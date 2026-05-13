@@ -53,7 +53,7 @@ if st.button("Сохранить параметры", type="primary"):
     set_setting("pallet_tail_threshold_pct", threshold, "int")
     set_setting("dead_window_days", window, "int")
     set_setting("seasonal_baseline", baseline, "str")
-    st.success("Параметры сохранены.")
+    st.toast("Параметры сохранены", icon="✅")
 
 st.divider()
 
@@ -84,6 +84,7 @@ edited = st.data_editor(
     df_initial,
     num_rows="dynamic",
     use_container_width=True,
+    height=320,
     column_config={
         "id": st.column_config.NumberColumn("ID", disabled=True),
         "name": st.column_config.TextColumn("Название", required=True),
@@ -135,5 +136,4 @@ if st.button("Сохранить камеры", type="primary"):
 
         session.commit()
 
-    st.success("Камеры сохранены.")
-    st.rerun()
+    st.toast("Камеры сохранены", icon="✅")
