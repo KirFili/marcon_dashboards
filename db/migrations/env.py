@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from alembic import context
 
 from core.db import DATABASE_URL
+from core.models import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
@@ -13,11 +14,8 @@ config.set_main_option("sqlalchemy.url", DATABASE_URL)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

@@ -1,6 +1,7 @@
 import streamlit as st
 
 from core.auth import require_password
+from core.settings import bootstrap_defaults
 
 st.set_page_config(
     page_title="Marcon Dashboards",
@@ -9,6 +10,7 @@ st.set_page_config(
 )
 
 require_password()
+bootstrap_defaults()
 
 st.title("Marcon Dashboards")
 st.markdown(
