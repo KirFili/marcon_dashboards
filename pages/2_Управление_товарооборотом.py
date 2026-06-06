@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_password
+from core.fmt import money, num
 from core.metrics import load_chambers, load_facts
 from core.settings import bootstrap_defaults, get_setting
 
@@ -72,16 +73,20 @@ if f.empty:
 # ---------- KPI ----------
 rev = f["revenue"].sum()
 gp = f["gross_profit"].sum()
+# занятость и ВП/паллетоместо — только по месяцам, где есть остатки (иначе
+# делёж/усреднение по «пустым» месяцам без дневных данных занижает числа)
 occ = f[f["slots"] > 0]
-gp_per_slot = gp / occ["slots"].sum() if occ["slots"].sum() else 0
-avg_slots = f.groupby("month")["slots"].sum().mean()
+slots_sum = occ["slots"].sum()
+gp_per_slot = occ["gross_profit"].sum() / slots_sum if slots_sum else 0
+months_with_occ = occ.groupby("month")["slots"].sum()
+avg_slots = months_with_occ.mean() if len(months_with_occ) else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Выручка", f"{rev/1e6:,.1f} млн ₽")
-c2.metric("Валовая прибыль", f"{gp/1e6:,.1f} млн ₽")
+c1.metric("Выручка", money(rev))
+c2.metric("Валовая прибыль", money(gp))
 c3.metric("Маржа", f"{100*gp/rev:.1f}%" if rev else "—")
-c4.metric("Ср. занято/мес", f"{avg_slots:,.0f} мест")
-c5.metric("ВП на паллетоместо", f"{gp_per_slot:,.0f} ₽/мес")
+c4.metric("Ср. занято/мес", num(avg_slots, 0) + " мест")
+c5.metric("ВП на паллетоместо", money(gp_per_slot, "/мес"))
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["Динамика", "Камеры", "Рейтинг SKU", "Эффективность", "Сезонность"]

@@ -57,6 +57,38 @@ if st.button("Сохранить параметры", type="primary"):
 
 st.divider()
 
+# ---------- Пороги ABC / XYZ ----------
+st.subheader("Пороги ABC / XYZ")
+st.caption("ABC — по доле накопленной выручки. XYZ — по коэффициенту вариации "
+           "(с поправкой на сезон): ниже X — стабильный, ниже Y — умеренный, выше — Z.")
+a1, a2, a3, a4 = st.columns(4)
+with a1:
+    abc_a = st.number_input("ABC: класс A до, %", min_value=1, max_value=99,
+                            value=int(get_setting("abc_a_pct") or 80), step=1)
+with a2:
+    abc_b = st.number_input("ABC: класс B до, %", min_value=1, max_value=100,
+                            value=int(get_setting("abc_b_pct") or 95), step=1)
+with a3:
+    xyz_x = st.number_input("XYZ: класс X до, % (CV)", min_value=1, max_value=200,
+                            value=int(get_setting("xyz_x_pct") or 10), step=1)
+with a4:
+    xyz_y = st.number_input("XYZ: класс Y до, % (CV)", min_value=1, max_value=300,
+                            value=int(get_setting("xyz_y_pct") or 25), step=1)
+
+if st.button("Сохранить пороги ABC/XYZ", type="primary"):
+    if abc_b <= abc_a:
+        st.error("Порог B должен быть больше порога A.")
+    elif xyz_y <= xyz_x:
+        st.error("Порог Y должен быть больше порога X.")
+    else:
+        set_setting("abc_a_pct", abc_a, "int")
+        set_setting("abc_b_pct", abc_b, "int")
+        set_setting("xyz_x_pct", xyz_x, "int")
+        set_setting("xyz_y_pct", xyz_y, "int")
+        st.toast("Пороги сохранены", icon="✅")
+
+st.divider()
+
 # ---------- Камеры хранения ----------
 st.subheader("Камеры хранения")
 st.caption(

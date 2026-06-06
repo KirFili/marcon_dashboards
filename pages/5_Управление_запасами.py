@@ -60,7 +60,7 @@ k2.metric("Класс A", int((sold["abc"] == "A").sum()))
 k3.metric("Класс B", int((sold["abc"] == "B").sum()))
 k4.metric("Класс C", int((sold["abc"] == "C").sum()))
 turn = f["turnover"].dropna()
-k5.metric("Медиана оборачиваемости", f"{turn.median():.2f}" if len(turn) else "—")
+k5.metric("Медиана оборачиваемости", f"{turn.median():.1f}" if len(turn) else "—")
 
 tab1, tab2 = st.tabs(["ABC / XYZ", "Оборачиваемость"])
 
@@ -99,8 +99,8 @@ with tab1:
         column_config={
             "Выручка": st.column_config.NumberColumn(format="%.0f"),
             "CV": st.column_config.NumberColumn(format="%.2f"),
-            "Оборачиваемость": st.column_config.NumberColumn(format="%.2f"),
-            "Дни покрытия": st.column_config.NumberColumn(format="%.0f"),
+            "Оборачиваемость": st.column_config.NumberColumn(format="%.1f"),
+            "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
         },
     )
 
@@ -124,6 +124,9 @@ with tab2:
         st.plotly_chart(figt, use_container_width=True)
 
         c1, c2 = st.columns(2)
+        inv = inv.assign(turnover=inv["turnover"].round(1),
+                         coverage_days=inv["coverage_days"].round(1),
+                         current_stock=inv["current_stock"].round(0))
         slow = inv.sort_values("turnover").head(15)
         fast = inv.sort_values("turnover", ascending=False).head(15)
         c1.markdown("**Залежавшиеся (низкая оборачиваемость)**")

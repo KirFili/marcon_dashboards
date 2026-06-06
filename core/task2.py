@@ -14,26 +14,22 @@ from sqlalchemy import func, select
 
 from core.db import SessionLocal
 from core.models import Chamber, Sale, Sku, StockDaily
-
-# пороги (доля накопленной выручки для A/B; остальное C)
-ABC_A, ABC_B = 0.80, 0.95
-# пороги коэффициента вариации для X/Y (выше — Z)
-XYZ_X, XYZ_Y = 0.10, 0.25
+from core.settings import get_setting
 
 
-def _xyz(cv: float | None) -> str:
-    if cv is None:
-        return "—"
-    if cv <= XYZ_X:
-        return "X"
-    if cv <= XYZ_Y:
-        return "Y"
-    return "Z"
+def _thresholds() -> tuple[float, float, float, float]:
+    """Пороги ABC (A,B) и XYZ (X,Y) из настроек, в долях."""
+    abc_a = (get_setting("abc_a_pct") or 80) / 100
+    abc_b = (get_setting("abc_b_pct") or 95) / 100
+    xyz_x = (get_setting("xyz_x_pct") or 10) / 100
+    xyz_y = (get_setting("xyz_y_pct") or 25) / 100
+    return abc_a, abc_b, xyz_x, xyz_y
 
 
 def load_assortment() -> pd.DataFrame:
     """Датафрейм по SKU: revenue/gp, ABC, CV, XYZ, оборачиваемость, дни
     покрытия, остатки. ABC/XYZ — по продажам; оборот — по дневным остаткам."""
+    abc_a, abc_b, xyz_x, xyz_y = _thresholds()
     with SessionLocal() as session:
         chambers = {c.id: c.name for c in session.scalars(select(Chamber))}
         skus = {x.id: x for x in session.scalars(select(Sku))}
@@ -59,7 +55,7 @@ def load_assortment() -> pd.DataFrame:
         cum = agg["revenue"].clip(lower=0).cumsum()
         agg["cum_share"] = cum / total if total else 0.0
         agg["abc"] = agg["cum_share"].apply(
-            lambda s: "A" if s <= ABC_A else ("B" if s <= ABC_B else "C")
+            lambda s: "A" if s <= abc_a else ("B" if s <= abc_b else "C")
         )
         # XYZ с поправкой на сезон: сезонный индекс по календарному месяцу
         # (из совокупной выручки), затем CV десезонализованного ряда по
@@ -91,7 +87,13 @@ def load_assortment() -> pd.DataFrame:
             cv_vals.append(des.std() / mu if mu > 0 else np.nan)
         cvdf = pd.DataFrame({"sku_id": piv.index, "cv": cv_vals})
         agg = agg.merge(cvdf, on="sku_id", how="left")
-        agg["xyz"] = agg["cv"].apply(lambda c: _xyz(None if pd.isna(c) else c))
+
+        def _xyz(c):
+            if pd.isna(c):
+                return "—"
+            return "X" if c <= xyz_x else ("Y" if c <= xyz_y else "Z")
+
+        agg["xyz"] = agg["cv"].apply(_xyz)
 
     # --- дневные остатки: оборачиваемость, дни покрытия ---
     ddf = pd.DataFrame(
