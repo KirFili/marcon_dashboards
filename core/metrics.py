@@ -1,7 +1,8 @@
 """Сводные метрики задачи 1: эффективность SKU (валовая прибыль против
 занятых паллетомест) по месяцам.
 
-Занятость месяца = паллетоместа от среднего остатка (нач+кон)/2.
+Занятость месяца = среднее по дням месяца от паллетомест дня (нач+кон)/2.
+Источник остатков — дневные ведомости (`stock_daily`).
 """
 
 from __future__ import annotations
@@ -11,35 +12,49 @@ from sqlalchemy import select
 
 from core.db import SessionLocal
 from core.inventory import occupancy_slots
-from core.models import Chamber, Sale, Sku, Stock
+from core.models import Chamber, Sale, Sku, StockDaily
 from core.sku_fields import build_ref as _ref
 
 
 def load_facts() -> pd.DataFrame:
-    """Датафрейм SKU×месяц: revenue, gross_profit, slots (занятость), мета."""
+    """Датафрейм SKU×месяц: revenue, gross_profit, slots (занятость), мета.
+
+    Занятость агрегируется из дневных остатков: паллетоместа считаются по
+    каждому дню, затем усредняются по дням месяца; отгрузка — сумма по дням.
+    """
     with SessionLocal() as session:
         chambers = {c.id: c.name for c in session.scalars(select(Chamber))}
         skus = {s.id: s for s in session.scalars(select(Sku))}
-        stock = session.scalars(select(Stock)).all()
+        daily = session.scalars(select(StockDaily)).all()
         sales = session.scalars(select(Sale)).all()
 
     refs = {sid: _ref(s) for sid, s in skus.items()}
 
-    srows = []
-    for st in stock:
+    drows = []
+    for st in daily:
         avg = (st.opening + st.closing) / 2.0
-        srows.append({
-            "sku_id": st.sku_id, "period": st.period,
+        drows.append({
+            "sku_id": st.sku_id,
+            "month": f"{st.day.year:04d}-{st.day.month:02d}",
             "slots": occupancy_slots(refs[st.sku_id], avg),
             "outbound": st.outbound,
         })
-    sdf = pd.DataFrame(srows, columns=["sku_id", "period", "slots", "outbound"])
+    ddf = pd.DataFrame(drows, columns=["sku_id", "month", "slots", "outbound"])
+    if not ddf.empty:
+        ddf["slots"] = pd.to_numeric(ddf["slots"], errors="coerce")
+        ddf["outbound"] = pd.to_numeric(ddf["outbound"], errors="coerce")
+        occ = ddf.groupby(["sku_id", "month"]).agg(
+            slots=("slots", "mean"), outbound=("outbound", "sum")
+        ).reset_index()
+    else:
+        occ = pd.DataFrame(columns=["sku_id", "month", "slots", "outbound"])
+
     qdf = pd.DataFrame(
-        [{"sku_id": x.sku_id, "period": x.period, "revenue": x.revenue,
-          "gross_profit": x.gross_profit} for x in sales],
-        columns=["sku_id", "period", "revenue", "gross_profit"],
+        [{"sku_id": x.sku_id, "month": f"{x.period.year:04d}-{x.period.month:02d}",
+          "revenue": x.revenue, "gross_profit": x.gross_profit} for x in sales],
+        columns=["sku_id", "month", "revenue", "gross_profit"],
     )
-    df = pd.merge(sdf, qdf, on=["sku_id", "period"], how="outer")
+    df = pd.merge(occ, qdf, on=["sku_id", "month"], how="outer")
 
     meta = pd.DataFrame([
         {"sku_id": sid, "code": s.code, "name": s.name,
@@ -48,8 +63,7 @@ def load_facts() -> pd.DataFrame:
         for sid, s in skus.items()
     ])
     df = df.merge(meta, on="sku_id", how="left")
-    df["period"] = pd.to_datetime(df["period"])
-    df["month"] = df["period"].dt.strftime("%Y-%m")
+    df["period"] = pd.to_datetime(df["month"] + "-01")
     for col in ("revenue", "gross_profit", "slots", "outbound"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
