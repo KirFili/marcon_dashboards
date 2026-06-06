@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -156,6 +157,18 @@ class StockRow:
     closing: float
 
 
+def stock_period(path: str | Path) -> date | None:
+    """Месяц ведомости из параметра «Период: dd.mm.yyyy - ...» (первая дата)."""
+    grid = _read_grid(path)
+    for row in grid[:10]:
+        for cell in row:
+            if cell.startswith("Период"):
+                m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", cell)
+                if m:
+                    return date(int(m.group(3)), int(m.group(2)), 1)
+    return None
+
+
 def parse_stock(path: str | Path) -> list[StockRow]:
     """Ведомость -> список движений. Колонки находим по подписям
     «Начальный остаток / Приход / Расход / Конечный остаток»."""
@@ -226,6 +239,20 @@ def units_per_pallet(ref: SkuRef) -> tuple[float | None, str]:
     if bpp and ref.units_per_box:
         return bpp * ref.units_per_box, "коробов-паллету×штук-коробке"
     return None, ""
+
+
+def occupancy_slots(ref: SkuRef, qty: float) -> int | None:
+    """Занятые паллетоместа для остатка `qty` (в единице хранения SKU)."""
+    unit = ref.unit
+    if unit in BOX_UNITS:
+        cap, _ = boxes_per_pallet(ref)
+        return slots(qty, cap)
+    if unit in PIECE_UNITS:
+        cap, _ = units_per_pallet(ref)
+        return slots(qty, cap)
+    if unit in WEIGHT_UNITS:
+        return slots(qty * WEIGHT_UNITS[unit], WEIGHT_CAP)
+    return None
 
 
 def has_pallet_basis(ref: SkuRef) -> bool:

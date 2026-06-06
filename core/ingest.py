@@ -13,8 +13,15 @@ from pathlib import Path
 from sqlalchemy import select
 
 from core.db import SessionLocal
-from core.inventory import SkuRef, chamber_of, parse_sales, parse_skus
-from core.models import Chamber, Sale, Sku, Upload
+from core.inventory import (
+    SkuRef,
+    chamber_of,
+    parse_sales,
+    parse_skus,
+    parse_stock,
+    stock_period,
+)
+from core.models import Chamber, Sale, Sku, Stock, Upload
 
 
 def file_hash(path: str | Path) -> str:
@@ -126,6 +133,55 @@ def import_sales(path: str | Path, *, force: bool = False, session=None) -> dict
         session.commit()
         return {"skipped": False, "parsed": len(rows), "created": created,
                 "updated": updated, "skipped_no_sku": skipped_no_sku}
+    finally:
+        if own:
+            session.close()
+
+
+def import_stock(path: str | Path, *, force: bool = False, session=None) -> dict:
+    """Загружает ОДНУ месячную ведомость в `stock` (месяц берётся из «Период»
+    внутри файла, upsert по sku+месяц)."""
+    own = session is None
+    session = session or SessionLocal()
+    try:
+        h = file_hash(path)
+        if not force and session.scalar(select(Upload).where(Upload.file_hash == h)):
+            return {"skipped": True, "reason": "файл уже загружен (тот же hash)"}
+
+        period = stock_period(path)
+        if period is None:
+            return {"skipped": True, "reason": "не найден период в файле"}
+        rows = parse_stock(path)
+        sku_ids = {s.code: s.id for s in session.scalars(select(Sku))}
+        upload = Upload(kind="stock", filename=Path(path).name, file_hash=h,
+                        row_count=len(rows))
+        session.add(upload)
+        session.flush()
+
+        existing = {
+            s.sku_id: s
+            for s in session.scalars(select(Stock).where(Stock.period == period))
+        }
+        created = updated = skipped_no_sku = 0
+        for r in rows:
+            sid = sku_ids.get(r.code)
+            if sid is None:
+                skipped_no_sku += 1
+                continue
+            st = existing.get(sid)
+            if st is None:
+                session.add(Stock(sku_id=sid, period=period, opening=r.opening,
+                                  inbound=r.inbound, outbound=r.outbound,
+                                  closing=r.closing, upload_id=upload.id))
+                created += 1
+            else:
+                st.opening, st.inbound = r.opening, r.inbound
+                st.outbound, st.closing = r.outbound, r.closing
+                st.upload_id = upload.id
+                updated += 1
+        session.commit()
+        return {"skipped": False, "period": str(period), "parsed": len(rows),
+                "created": created, "updated": updated, "skipped_no_sku": skipped_no_sku}
     finally:
         if own:
             session.close()
