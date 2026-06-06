@@ -120,25 +120,6 @@ class Sale(Base):
     __table_args__ = (UniqueConstraint("sku_id", "period", name="uq_sales_sku_period"),)
 
 
-class Stock(Base):
-    __tablename__ = "stock"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"))
-    period: Mapped[date] = mapped_column(Date)  # первое число месяца
-    # остатки/движения за месяц, в единице хранения SKU
-    opening: Mapped[float] = mapped_column(Float)
-    inbound: Mapped[float] = mapped_column(Float)
-    outbound: Mapped[float] = mapped_column(Float)
-    closing: Mapped[float] = mapped_column(Float)
-    upload_id: Mapped[int | None] = mapped_column(
-        ForeignKey("uploads.id"), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("sku_id", "period", name="uq_stock_sku_period"),)
-
-
 class StockDaily(Base):
     __tablename__ = "stock_daily"
 
