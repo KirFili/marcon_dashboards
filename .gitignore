@@ -20,3 +20,5 @@ __pycache__/
 # Logs / runtime
 *.log
 data/uploads/
+data/samples/
+!data/samples/.gitkeep
