@@ -1,3 +1,4 @@
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -28,6 +29,11 @@ df = _facts()
 if df.empty:
     st.info("Нет данных. Загрузите справочник, продажи и остатки.")
     st.stop()
+
+df["year"] = df["period"].dt.year
+df["mon"] = df["period"].dt.month
+MONTHS_RU = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
+df["mon_name"] = df["mon"].apply(lambda m: MONTHS_RU[int(m) - 1] if pd.notna(m) else "")
 
 scope = set((get_setting("scope_groups") or "").split(","))
 months = sorted(df["month"].dropna().unique())
@@ -77,7 +83,9 @@ c3.metric("Маржа", f"{100*gp/rev:.1f}%" if rev else "—")
 c4.metric("Ср. занято/мес", f"{avg_slots:,.0f} мест")
 c5.metric("ВП на паллетоместо", f"{gp_per_slot:,.0f} ₽/мес")
 
-tab1, tab2, tab3 = st.tabs(["Динамика", "Камеры", "Рейтинг SKU"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Динамика", "Камеры", "Рейтинг SKU", "Эффективность", "Сезонность"]
+)
 
 # ---------- Динамика ----------
 with tab1:
@@ -156,3 +164,58 @@ with tab3:
             "gp_per_slot": "ВП/паллетоместо"}),
         use_container_width=True, hide_index=True, height=400,
     )
+
+# ---------- Эффективность (scatter) ----------
+with tab4:
+    st.caption(
+        "Каждая точка — SKU. По X — сколько места в среднем держит, по Y — "
+        "сколько валовой прибыли приносит одно паллетоместо. Правый-нижний угол "
+        "(много места, низкая отдача) — кандидаты на сокращение."
+    )
+    eff = f.groupby(["code", "name", "chamber"]).agg(
+        gp=("gross_profit", "sum"), revenue=("revenue", "sum"),
+        slot_months=("slots", "sum"), n=("month", "nunique"),
+    ).reset_index()
+    eff = eff[eff["slot_months"] > 0].copy()
+    eff["avg_slots"] = (eff["slot_months"] / eff["n"]).round(1)
+    eff["gp_per_slot"] = (eff["gp"] / eff["slot_months"]).round(0)
+    eff["revenue"] = eff["revenue"].clip(lower=0)
+    if eff.empty:
+        st.info("Нет данных по занятости под текущие фильтры.")
+    else:
+        log_x = st.checkbox("Логарифм по оси X (если разброс большой)", value=True)
+        fig4 = px.scatter(
+            eff, x="avg_slots", y="gp_per_slot", size="revenue", color="chamber",
+            hover_name="name", hover_data={"code": True, "avg_slots": True,
+                                           "gp_per_slot": ":,.0f", "revenue": ":,.0f"},
+            log_x=log_x, size_max=40, height=560,
+            labels={"avg_slots": "Среднее занято паллетомест",
+                    "gp_per_slot": "ВП на паллетоместо, ₽", "chamber": "Камера",
+                    "revenue": "Выручка"},
+        )
+        fig4.update_layout(margin=dict(t=30), legend_orientation="h")
+        st.plotly_chart(fig4, use_container_width=True)
+
+# ---------- Сезонность (год-к-году) ----------
+with tab5:
+    st.caption("Сравнение по календарным месяцам год-к-году. 2026 — частичный (по май).")
+    metric = st.radio("Показатель", ["Валовая прибыль", "Выручка"], horizontal=True)
+    col = "gross_profit" if metric == "Валовая прибыль" else "revenue"
+    seas = f.groupby(["mon", "mon_name", "year"])[col].sum().reset_index()
+    seas = seas.sort_values("mon")
+    fig5 = px.line(
+        seas, x="mon_name", y=col, color="year", markers=True, height=480,
+        category_orders={"mon_name": MONTHS_RU},
+        labels={"mon_name": "Месяц", col: metric, "year": "Год"},
+    )
+    fig5.update_layout(margin=dict(t=30), legend_orientation="h")
+    st.plotly_chart(fig5, use_container_width=True)
+
+    piv = seas.pivot_table(index="mon_name", columns="year", values=col,
+                           aggfunc="sum").reindex(MONTHS_RU).dropna(how="all")
+    years = sorted(seas["year"].unique())
+    if len(years) >= 2:
+        y1, y2 = years[-2], years[-1]
+        if y1 in piv and y2 in piv:
+            piv["Δ г/г, %"] = ((piv[y2] - piv[y1]) / piv[y1] * 100).round(1)
+    st.dataframe(piv, use_container_width=True)
