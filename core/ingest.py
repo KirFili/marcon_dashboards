@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from core.db import SessionLocal
 from core.inventory import (
@@ -94,45 +94,48 @@ def import_skus(path: str | Path, *, force: bool = False, session=None) -> dict:
             session.close()
 
 
-def import_sales(path: str | Path, *, force: bool = False, session=None) -> dict:
-    """Загружает помесячный отчёт продаж в `sales` (upsert по sku+месяц).
-    SKU без кода в справочнике пропускаются (с подсчётом)."""
+def import_sales(
+    path: str | Path, *, filename: str | None = None, force: bool = False, session=None
+) -> dict:
+    """Загружает отчёт продаж в `sales` с ЗАМЕНОЙ ПО МЕСЯЦАМ: для каждого месяца,
+    присутствующего в файле, существующие строки этого месяца удаляются и
+    записываются заново — данные за месяц = ровно то, что в файле (без
+    осиротевших SKU). SKU без кода в справочнике пропускаются (с подсчётом)."""
     own = session is None
     session = session or SessionLocal()
     try:
         h = file_hash(path)
-        if not force and session.scalar(select(Upload).where(Upload.file_hash == h)):
+        existing_upload = session.scalar(select(Upload).where(Upload.file_hash == h))
+        if existing_upload and not force:
             return {"skipped": True, "reason": "файл уже загружен (тот же hash)"}
 
         rows = parse_sales(path)
         sku_ids = {s.code: s.id for s in session.scalars(select(Sku))}
-        upload = Upload(kind="sales", filename=Path(path).name, file_hash=h,
-                        row_count=len(rows))
+        months = sorted({r.period for r in rows})
+        upload = existing_upload or Upload(file_hash=h)
+        upload.kind = "sales"
+        upload.filename = filename or Path(path).name
+        upload.row_count = len(rows)
         session.add(upload)
         session.flush()
 
-        existing = {
-            (s.sku_id, s.period): s for s in session.scalars(select(Sale))
-        }
-        created = updated = skipped_no_sku = 0
+        # замена по месяцам: чистим существующие строки этих месяцев
+        if months:
+            session.execute(delete(Sale).where(Sale.period.in_(months)))
+
+        created = skipped_no_sku = 0
         for r in rows:
             sid = sku_ids.get(r.code)
             if sid is None:
                 skipped_no_sku += 1
                 continue
-            sale = existing.get((sid, r.period))
-            if sale is None:
-                session.add(Sale(sku_id=sid, period=r.period, revenue=r.revenue,
-                                 gross_profit=r.gross_profit, upload_id=upload.id))
-                created += 1
-            else:
-                sale.revenue = r.revenue
-                sale.gross_profit = r.gross_profit
-                sale.upload_id = upload.id
-                updated += 1
+            session.add(Sale(sku_id=sid, period=r.period, revenue=r.revenue,
+                             gross_profit=r.gross_profit, upload_id=upload.id))
+            created += 1
         session.commit()
         return {"skipped": False, "parsed": len(rows), "created": created,
-                "updated": updated, "skipped_no_sku": skipped_no_sku}
+                "replaced_months": len(months),
+                "months": [str(m) for m in months], "skipped_no_sku": skipped_no_sku}
     finally:
         if own:
             session.close()
