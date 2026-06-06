@@ -233,11 +233,13 @@ def boxes_per_pallet(ref: SkuRef) -> tuple[float | None, str]:
 
 
 def units_per_pallet(ref: SkuRef) -> tuple[float | None, str]:
-    if ref.units_per_pallet:
-        return ref.units_per_pallet, "прямое"
+    # «Штук на паллете» [126] в 1С часто недостоверно (≠ штук-коробке×коробов-паллете,
+    # расхождение до 10-25×), поэтому СНАЧАЛА считаем через коробки.
     bpp, _ = boxes_per_pallet(ref)
     if bpp and ref.units_per_box:
         return bpp * ref.units_per_box, "коробов-паллету×штук-коробке"
+    if ref.units_per_pallet:
+        return ref.units_per_pallet, "прямое [126]"
     return None, ""
 
 
