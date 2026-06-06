@@ -12,18 +12,19 @@ def _nan(v) -> bool:
         return v is None
 
 
-def money(v, suffix: str = "") -> str:
-    """Деньги компактно: млрд/млн/тыс ₽ с одним знаком. suffix напр. '/мес'."""
+def money(v, suffix: str = "", digits: int = 1) -> str:
+    """Деньги компактно: млрд/млн/тыс ₽. digits — знаков после запятой.
+    suffix напр. '/мес'."""
     if _nan(v):
         return "—"
     v = float(v)
     a = abs(v)
     if a >= 1e9:
-        s = f"{v / 1e9:.1f} млрд ₽"
+        s = f"{v / 1e9:.{digits}f} млрд ₽"
     elif a >= 1e6:
-        s = f"{v / 1e6:.1f} млн ₽"
+        s = f"{v / 1e6:.{digits}f} млн ₽"
     elif a >= 1e3:
-        s = f"{v / 1e3:.1f} тыс ₽"
+        s = f"{v / 1e3:.{digits}f} тыс ₽"
     else:
         s = f"{v:.0f} ₽"
     return s + suffix

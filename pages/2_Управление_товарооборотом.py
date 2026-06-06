@@ -82,9 +82,9 @@ months_with_occ = occ.groupby("month")["slots"].sum()
 avg_slots = months_with_occ.mean() if len(months_with_occ) else 0
 
 c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Выручка", money(rev))
-c2.metric("Валовая прибыль", money(gp))
-c3.metric("Маржа", f"{100*gp/rev:.1f}%" if rev else "—")
+c1.metric("Выручка", money(rev, digits=3))
+c2.metric("Валовая прибыль", money(gp, digits=3))
+c3.metric("Маржа", f"{100*gp/rev:.3f}%" if rev else "—")
 c4.metric("Ср. занято/мес", num(avg_slots, 0) + " мест")
 c5.metric("ВП на паллетоместо", money(gp_per_slot, "/мес"))
 
