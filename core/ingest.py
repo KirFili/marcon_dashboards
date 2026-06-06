@@ -21,7 +21,7 @@ from core.inventory import (
     parse_stock,
     stock_period,
 )
-from core.models import Chamber, Sale, Sku, Stock, Upload
+from core.models import Chamber, Sale, Sku, Stock, StockDaily, Upload
 
 
 def file_hash(path: str | Path) -> str:
@@ -133,6 +133,60 @@ def import_sales(path: str | Path, *, force: bool = False, session=None) -> dict
         session.commit()
         return {"skipped": False, "parsed": len(rows), "created": created,
                 "updated": updated, "skipped_no_sku": skipped_no_sku}
+    finally:
+        if own:
+            session.close()
+
+
+def import_stock_daily(
+    path: str | Path, *, filename: str | None = None, force: bool = False, session=None
+) -> dict:
+    """Загружает ОДНУ дневную ведомость в `stock_daily` (день из «Период»
+    внутри файла). filename — исходное имя (при загрузке из UI через temp-файл)."""
+    own = session is None
+    session = session or SessionLocal()
+    try:
+        h = file_hash(path)
+        existing_upload = session.scalar(select(Upload).where(Upload.file_hash == h))
+        if existing_upload and not force:
+            return {"skipped": True, "reason": "файл уже загружен (тот же hash)"}
+
+        day = stock_period(path)
+        if day is None:
+            return {"skipped": True, "reason": "не найден период (день) в файле"}
+        rows = parse_stock(path)
+        sku_ids = {s.code: s.id for s in session.scalars(select(Sku))}
+        upload = existing_upload or Upload(file_hash=h)
+        upload.kind = "stock_daily"
+        upload.filename = filename or Path(path).name
+        upload.row_count = len(rows)
+        session.add(upload)
+        session.flush()
+
+        existing = {
+            s.sku_id: s
+            for s in session.scalars(select(StockDaily).where(StockDaily.day == day))
+        }
+        created = updated = skipped_no_sku = 0
+        for r in rows:
+            sid = sku_ids.get(r.code)
+            if sid is None:
+                skipped_no_sku += 1
+                continue
+            st = existing.get(sid)
+            if st is None:
+                session.add(StockDaily(sku_id=sid, day=day, opening=r.opening,
+                                       inbound=r.inbound, outbound=r.outbound,
+                                       closing=r.closing, upload_id=upload.id))
+                created += 1
+            else:
+                st.opening, st.inbound = r.opening, r.inbound
+                st.outbound, st.closing = r.outbound, r.closing
+                st.upload_id = upload.id
+                updated += 1
+        session.commit()
+        return {"skipped": False, "day": str(day), "parsed": len(rows),
+                "created": created, "updated": updated, "skipped_no_sku": skipped_no_sku}
     finally:
         if own:
             session.close()
