@@ -9,6 +9,12 @@ DEFAULT_SETTINGS: dict[str, tuple[str, str]] = {
     "seasonal_baseline": ("year_over_year", "str"),
     # профильные группы (префиксы поля «Групировка по видам»), через запятую
     "scope_groups": ("30,31,32,33,34,25,16,27,21,22", "str"),
+    # ABC: верхние границы доли накопленной выручки для классов A и B, %
+    "abc_a_pct": ("80", "int"),
+    "abc_b_pct": ("95", "int"),
+    # XYZ: верхние границы коэффициента вариации для классов X и Y, %
+    "xyz_x_pct": ("10", "int"),
+    "xyz_y_pct": ("25", "int"),
 }
 
 DEFAULT_CHAMBERS: list[tuple[str, float, int, int]] = [
