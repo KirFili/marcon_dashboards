@@ -88,9 +88,9 @@ edited = st.data_editor(
     ],
     column_config={
         "id": None, "profile": None,
-        "code": st.column_config.TextColumn("Код 1С", disabled=True),
-        "name": st.column_config.TextColumn("Наименование", disabled=True, width="large"),
-        "group_kind": st.column_config.TextColumn("Групировка", disabled=True),
+        "code": st.column_config.TextColumn("Код 1С", disabled=True, pinned=True),
+        "name": st.column_config.TextColumn("Наименование", disabled=True, width="medium", pinned=True),
+        "group_kind": st.column_config.TextColumn("Групировка", disabled=True, pinned=True),
         "chamber": st.column_config.TextColumn("Камера", disabled=True),
         "unit": st.column_config.SelectboxColumn("Ед. хранения", options=UNIT_OPTIONS),
         "gap": st.column_config.CheckboxColumn("Пробел", disabled=True, help="Нельзя посчитать паллеты"),
