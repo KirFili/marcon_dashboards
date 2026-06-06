@@ -31,7 +31,7 @@ def _save_temp(uploaded) -> str:
     return tmp.name
 
 
-def _run(uploaded_files, importer, **kw):
+def _process(uploaded_files, importer, **kw) -> list[dict]:
     rows = []
     for uf in uploaded_files:
         p = _save_temp(uf)
@@ -48,16 +48,33 @@ def _run(uploaded_files, importer, **kw):
             "Статус": r.get("reason", "ок"),
         })
     st.cache_data.clear()
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    return rows
 
 
 # ---------- Дневные остатки ----------
 st.subheader("📅 Дневные остатки (ведомость по товарам)")
 st.caption("Можно выбрать сразу много файлов — по одному на день. День берётся из «Период» внутри файла.")
+
+# показать итог прошлой загрузки (после очистки списка файлов)
+if "daily_result" in st.session_state:
+    res = st.session_state.pop("daily_result")
+    loaded = sum(1 for r in res if r["Статус"] == "ок")
+    skipped = len(res) - loaded
+    msg = f"Загружено файлов: {loaded} из {len(res)}"
+    if skipped:
+        msg += f" (пропущено: {skipped})"
+    st.toast(msg, icon="✅")
+    st.success(f"{msg}. Список очищен — можно выбирать новую партию.")
+    st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
+
+st.session_state.setdefault("daily_key", 0)
 daily = st.file_uploader("Дневные ведомости (.xlsx)", type=["xlsx"],
-                         accept_multiple_files=True, key="daily")
+                         accept_multiple_files=True,
+                         key=f"daily_{st.session_state['daily_key']}")
 if st.button("Загрузить дневные остатки", type="primary", disabled=not daily):
-    _run(daily, import_stock_daily)
+    st.session_state["daily_result"] = _process(daily, import_stock_daily)
+    st.session_state["daily_key"] += 1  # новый ключ -> список файлов обнулится
+    st.rerun()
 
 # ---------- Календарь покрытия ----------
 st.subheader("🗓️ Покрытие по дням")
@@ -93,12 +110,16 @@ with col1:
     st.subheader("📒 Справочник SKU")
     ref = st.file_uploader("Справочник (.xls/.xlsx)", type=["xls", "xlsx"], key="ref")
     if st.button("Загрузить справочник", disabled=not ref):
-        _run([ref], import_skus)
+        res = _process([ref], import_skus)
+        st.toast("Справочник загружен", icon="✅")
+        st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
 with col2:
     st.subheader("💰 Продажи (помесячно)")
     sal = st.file_uploader("Отчёт продаж (.xlsx)", type=["xlsx"], key="sales")
     if st.button("Загрузить продажи", disabled=not sal):
-        _run([sal], import_sales)
+        res = _process([sal], import_sales)
+        st.toast("Продажи загружены", icon="✅")
+        st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
 
 st.divider()
 
