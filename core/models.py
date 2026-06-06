@@ -137,3 +137,21 @@ class Stock(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint("sku_id", "period", name="uq_stock_sku_period"),)
+
+
+class StockDaily(Base):
+    __tablename__ = "stock_daily"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"))
+    day: Mapped[date] = mapped_column(Date)  # конкретный день
+    opening: Mapped[float] = mapped_column(Float)
+    inbound: Mapped[float] = mapped_column(Float)
+    outbound: Mapped[float] = mapped_column(Float)
+    closing: Mapped[float] = mapped_column(Float)
+    upload_id: Mapped[int | None] = mapped_column(
+        ForeignKey("uploads.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("sku_id", "day", name="uq_stock_daily_sku_day"),)

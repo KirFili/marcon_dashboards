@@ -158,14 +158,16 @@ class StockRow:
 
 
 def stock_period(path: str | Path) -> date | None:
-    """Месяц ведомости из параметра «Период: dd.mm.yyyy - ...» (первая дата)."""
+    """Точная дата НАЧАЛА периода ведомости из «Период: dd.mm.yyyy - ...».
+    Для дневного отчёта (начало==конец) это и есть нужный день; для месячного —
+    1-е число месяца."""
     grid = _read_grid(path)
     for row in grid[:10]:
         for cell in row:
             if cell.startswith("Период"):
                 m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", cell)
                 if m:
-                    return date(int(m.group(3)), int(m.group(2)), 1)
+                    return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
     return None
 
 
