@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -69,6 +70,8 @@ class Sku(Base):
     company: Mapped[str | None] = mapped_column(String(50), nullable=True)  # КомпанияОтгрузки
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ручные фиксации полей: имеют приоритет над 1С и НЕ перезаписываются импортом
+    overrides: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

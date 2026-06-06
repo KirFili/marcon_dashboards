@@ -10,18 +10,9 @@ import pandas as pd
 from sqlalchemy import select
 
 from core.db import SessionLocal
-from core.inventory import SkuRef, occupancy_slots
+from core.inventory import occupancy_slots
 from core.models import Chamber, Sale, Sku, Stock
-
-
-def _ref(s: Sku) -> SkuRef:
-    return SkuRef(
-        code=s.code, name=s.name or "", group_kind=s.group_kind or "",
-        group=s.category or "", unit=(s.unit or "").lower(),
-        boxes_per_layer=s.boxes_per_layer, boxes_per_pallet=s.boxes_per_pallet,
-        layers_per_pallet=s.layers_per_pallet, units_per_box=s.units_per_box,
-        units_per_pallet=s.units_per_pallet, company=s.company or "", temp=s.temp or "",
-    )
+from core.sku_fields import build_ref as _ref
 
 
 def load_facts() -> pd.DataFrame:

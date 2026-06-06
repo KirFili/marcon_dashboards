@@ -4,9 +4,10 @@ from sqlalchemy import select
 
 from core.auth import require_password
 from core.db import SessionLocal
-from core.inventory import SkuRef, has_pallet_basis
+from core.inventory import has_pallet_basis
 from core.models import Chamber, Sku
 from core.settings import bootstrap_defaults, get_setting
+from core.sku_fields import OVERRIDABLE, build_ref, effective
 
 st.set_page_config(page_title="Справочник SKU", page_icon="📒", layout="wide")
 require_password()
@@ -14,50 +15,36 @@ bootstrap_defaults()
 
 st.title("Справочник SKU")
 st.caption(
-    "Дозаполни недостающие упаковочные данные (коробок на паллете, штук в коробке "
-    "и т.п.). Поля из 1С (код, наименование, камера) — только для чтения. "
-    "При следующей загрузке из 1С ручные правки сохраняются там, где в 1С пусто."
+    "Дозаполни/исправь упаковочные данные и единицу хранения. Ручные правки "
+    "**фиксируются (🔒) и имеют приоритет над 1С** — новые выгрузки их не "
+    "перезаписывают. Чтобы вернуть значение из 1С — отметь «Сбросить к 1С»."
 )
 
-# редактируемые упаковочные поля
-EDITABLE = [
-    "units_per_box", "boxes_per_pallet", "boxes_per_layer",
-    "layers_per_pallet", "units_per_pallet",
-]
-SCOPE = (get_setting("scope_groups") or "").split(",")
-
-
-def _ref(row: dict) -> SkuRef:
-    return SkuRef(
-        code=row["code"], name=row["name"] or "", group_kind=row["group_kind"] or "",
-        group=row["category"] or "", unit=(row["unit"] or "").lower(),
-        boxes_per_layer=row["boxes_per_layer"], boxes_per_pallet=row["boxes_per_pallet"],
-        layers_per_pallet=row["layers_per_pallet"], units_per_box=row["units_per_box"],
-        units_per_pallet=row["units_per_pallet"], company=row["company"] or "",
-        temp=row["temp"] or "",
-    )
-
+UNIT_OPTIONS = ["", "шт", "Коробка", "коробка", "г", "кг", "л", "упак"]
+SCOPE = set((get_setting("scope_groups") or "").split(","))
 
 # ---------- загрузка ----------
 with SessionLocal() as session:
     chambers = {c.id: c.name for c in session.scalars(select(Chamber))}
     skus = session.scalars(select(Sku).order_by(Sku.group_kind, Sku.name)).all()
-    records = [
-        {
+    records = []
+    for s in skus:
+        ref = build_ref(s)
+        rec = {
             "id": s.id, "code": s.code, "name": s.name,
-            "group_kind": s.group_kind, "category": s.category, "unit": s.unit,
-            "chamber": chambers.get(s.chamber_id, ""),
-            "units_per_box": s.units_per_box, "boxes_per_pallet": s.boxes_per_pallet,
-            "boxes_per_layer": s.boxes_per_layer, "layers_per_pallet": s.layers_per_pallet,
-            "units_per_pallet": s.units_per_pallet,
+            "group_kind": s.group_kind, "chamber": chambers.get(s.chamber_id, ""),
+            "unit": effective(s, "unit") or "",
+            "units_per_box": effective(s, "units_per_box"),
+            "boxes_per_pallet": effective(s, "boxes_per_pallet"),
+            "boxes_per_layer": effective(s, "boxes_per_layer"),
+            "layers_per_pallet": effective(s, "layers_per_pallet"),
+            "units_per_pallet": effective(s, "units_per_pallet"),
+            "gap": not has_pallet_basis(ref),
+            "locked": bool(s.overrides),
+            "reset": False,
+            "profile": (s.group_kind or "")[:2] in SCOPE,
         }
-        for s in skus
-    ]
-
-for r in records:
-    ref = _ref({**r, "company": "", "temp": ""})  # company/temp не нужны для пробела
-    r["gap"] = not has_pallet_basis(ref)
-    r["profile"] = (r["group_kind"] or "")[:2] in SCOPE
+        records.append(rec)
 
 df = pd.DataFrame(records)
 
@@ -85,7 +72,7 @@ if q.strip():
 m1, m2, m3 = st.columns(3)
 m1.metric("Показано SKU", len(view))
 m2.metric("С пробелами (в выборке)", int(view["gap"].sum()))
-m3.metric("Профильных всего", int(df["profile"].sum()))
+m3.metric("Зафиксировано вручную 🔒", int(df["locked"].sum()))
 
 view = view.reset_index(drop=True)
 
@@ -95,43 +82,61 @@ edited = st.data_editor(
     use_container_width=True,
     height=560,
     column_order=[
-        "code", "name", "group_kind", "chamber", "unit", "gap",
+        "code", "name", "group_kind", "chamber", "unit", "gap", "locked",
         "units_per_box", "boxes_per_pallet", "boxes_per_layer",
-        "layers_per_pallet", "units_per_pallet",
+        "layers_per_pallet", "units_per_pallet", "reset",
     ],
     column_config={
-        "id": None, "category": None, "profile": None,
+        "id": None, "profile": None,
         "code": st.column_config.TextColumn("Код 1С", disabled=True),
         "name": st.column_config.TextColumn("Наименование", disabled=True, width="large"),
         "group_kind": st.column_config.TextColumn("Групировка", disabled=True),
         "chamber": st.column_config.TextColumn("Камера", disabled=True),
-        "unit": st.column_config.TextColumn("Ед.", disabled=True),
+        "unit": st.column_config.SelectboxColumn("Ед. хранения", options=UNIT_OPTIONS),
         "gap": st.column_config.CheckboxColumn("Пробел", disabled=True, help="Нельзя посчитать паллеты"),
+        "locked": st.column_config.CheckboxColumn("🔒", disabled=True, help="Есть ручная фиксация"),
         "units_per_box": st.column_config.NumberColumn("Штук в коробке", min_value=0, step=1),
         "boxes_per_pallet": st.column_config.NumberColumn("Коробок на паллете", min_value=0, step=1),
         "boxes_per_layer": st.column_config.NumberColumn("Коробов в слое", min_value=0, step=1),
         "layers_per_pallet": st.column_config.NumberColumn("Слоёв на паллете", min_value=0, step=1),
         "units_per_pallet": st.column_config.NumberColumn("Штук на паллете", min_value=0, step=1),
+        "reset": st.column_config.CheckboxColumn("Сбросить к 1С", help="Снять все ручные фиксации строки"),
     },
     key="sku_editor",
 )
 
 st.caption("⚠️ Сохрани перед сменой фильтров — иначе правки в текущей выборке сбросятся.")
 
-if st.button("Сохранить правки", type="primary"):
-    changed = 0
+
+def _norm(field, val):
+    if field == "unit":
+        return None if (pd.isna(val) or str(val).strip() == "") else str(val).strip()
+    return None if pd.isna(val) else int(val)
+
+
+if st.button("Сохранить", type="primary"):
+    locked_cnt = reset_cnt = 0
     with SessionLocal() as session:
         for i, row in edited.iterrows():
             sku = session.get(Sku, int(view.loc[i, "id"]))
             if sku is None:
                 continue
-            for field in EDITABLE:
-                new = None if pd.isna(row[field]) else int(row[field])
-                old = view.loc[i, field]
-                old = None if pd.isna(old) else int(old)
-                if new != old:
-                    setattr(sku, field, new)
-                    changed += 1
+            if bool(row["reset"]):
+                if sku.overrides:
+                    reset_cnt += 1
+                sku.overrides = {}
+                continue
+            ov = {}
+            for f in OVERRIDABLE:
+                ev = _norm(f, row[f])
+                base = getattr(sku, f)
+                base = base.lower() if (f == "unit" and isinstance(base, str)) else base
+                cmp = ev.lower() if (f == "unit" and isinstance(ev, str)) else ev
+                if cmp != base:  # отличается от 1С → фиксируем
+                    ov[f] = ev
+            sku.overrides = ov
+            if ov:
+                locked_cnt += 1
         session.commit()
-    st.toast(f"Сохранено правок: {changed}", icon="✅")
+    st.toast(f"Сохранено. Зафиксировано строк: {locked_cnt}, сброшено: {reset_cnt}", icon="✅")
     st.rerun()
