@@ -228,6 +228,17 @@ def units_per_pallet(ref: SkuRef) -> tuple[float | None, str]:
     return None, ""
 
 
+def has_pallet_basis(ref: SkuRef) -> bool:
+    """Можно ли посчитать паллеты по SKU (с учётом единицы и фолбэков)."""
+    if ref.unit in WEIGHT_UNITS:
+        return True
+    if ref.unit in BOX_UNITS:
+        return boxes_per_pallet(ref)[0] is not None
+    if ref.unit in PIECE_UNITS:
+        return units_per_pallet(ref)[0] is not None
+    return False
+
+
 def slots(amount: float, capacity: float | None, threshold=TAIL_THRESHOLD) -> int | None:
     """Паллетоместа: целое с порогом хвоста."""
     if not capacity or capacity <= 0:
