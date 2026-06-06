@@ -7,12 +7,14 @@ DEFAULT_SETTINGS: dict[str, tuple[str, str]] = {
     "pallet_tail_threshold_pct": ("10", "int"),
     "dead_window_days": ("90", "int"),
     "seasonal_baseline": ("year_over_year", "str"),
+    # профильные группы (префиксы поля «Групировка по видам»), через запятую
+    "scope_groups": ("30,31,32,33,34,25,16,27,21,22", "str"),
 }
 
 DEFAULT_CHAMBERS: list[tuple[str, float, int, int]] = [
-    ("−18 №1", -18.0, 100, 1),
-    ("−18 №2", -18.0, 100, 2),
-    ("+5", 5.0, 50, 3),
+    ("Заморозка СД", -18.0, 100, 1),
+    ("Заморозка ТП+ОБЩ", -18.0, 100, 2),
+    ("Охлажденка", 5.0, 50, 3),
 ]
 
 

@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -56,9 +58,20 @@ class Sku(Base):
     chamber_id: Mapped[int | None] = mapped_column(
         ForeignKey("chambers.id"), nullable=True
     )
+    # сырые поля 1С под расчёт паллет и скоуп
+    group_kind: Mapped[str | None] = mapped_column(String(100), nullable=True)  # Групировка по видам
+    unit: Mapped[str | None] = mapped_column(String(50), nullable=True)  # Единица хранения
     boxes_per_pallet: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    boxes_per_layer: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    layers_per_pallet: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    units_per_box: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    units_per_pallet: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temp: Mapped[str | None] = mapped_column(String(50), nullable=True)  # ТемпературныйРежим
+    company: Mapped[str | None] = mapped_column(String(50), nullable=True)  # КомпанияОтгрузки
     cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ручные фиксации полей: имеют приоритет над 1С и НЕ перезаписываются импортом
+    overrides: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -89,3 +102,38 @@ class Movement(Base):
         ForeignKey("uploads.id"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class Sale(Base):
+    __tablename__ = "sales"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"))
+    period: Mapped[date] = mapped_column(Date)  # первое число месяца
+    revenue: Mapped[float] = mapped_column(Float)
+    gross_profit: Mapped[float] = mapped_column(Float)
+    upload_id: Mapped[int | None] = mapped_column(
+        ForeignKey("uploads.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("sku_id", "period", name="uq_sales_sku_period"),)
+
+
+class Stock(Base):
+    __tablename__ = "stock"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"))
+    period: Mapped[date] = mapped_column(Date)  # первое число месяца
+    # остатки/движения за месяц, в единице хранения SKU
+    opening: Mapped[float] = mapped_column(Float)
+    inbound: Mapped[float] = mapped_column(Float)
+    outbound: Mapped[float] = mapped_column(Float)
+    closing: Mapped[float] = mapped_column(Float)
+    upload_id: Mapped[int | None] = mapped_column(
+        ForeignKey("uploads.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("sku_id", "period", name="uq_stock_sku_period"),)
