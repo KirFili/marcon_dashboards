@@ -181,28 +181,39 @@ with tab2:
         figt.update_xaxes(range=[-10, 380])
         st.plotly_chart(figt, use_container_width=True)
 
-        c1, c2 = st.columns(2)
         inv = inv.assign(turnover_days=inv["turnover_days"].round(0),
                          coverage_days=inv["coverage_days"].round(1),
                          current_stock=inv["current_stock"].round(0))
-        slow = inv.sort_values("turnover_days", ascending=False).head(15)
-        fast = inv.sort_values("turnover_days").head(15)
         _slowfast_cfg = {
             "Остаток": st.column_config.NumberColumn(format="localized"),
             "Оборот, дн": st.column_config.NumberColumn(
                 format="%.0f", help="Период оборота в днях: средний остаток ÷ "
                 "среднесуточная отгрузка."),
         }
-        c1.markdown("**Залежавшиеся (долгий оборот)**")
-        c1.dataframe(slow[["code", "name", "turnover_days", "coverage_days", "current_stock"]].rename(
-            columns={"code": "Код", "name": "Наименование", "turnover_days": "Оборот, дн",
-                     "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
-            use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
-        c2.markdown("**Быстрые (короткий оборот)**")
-        c2.dataframe(fast[["code", "name", "turnover_days", "coverage_days", "current_stock"]].rename(
-            columns={"code": "Код", "name": "Наименование", "turnover_days": "Оборот, дн",
-                     "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
-            use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
+        n_max = len(inv)
+
+        def _slowfast_block(col, title, ordered, key):
+            with col:
+                n = st.number_input("Сколько позиций показать", min_value=1,
+                                    max_value=n_max, value=min(15, n_max), step=1,
+                                    key=key, help="Введите число и нажмите Enter.")
+                sub = ordered.head(int(n))
+                st.metric("Медиана оборота по выборке, дн",
+                          f"{sub['turnover_days'].median():.0f} дн" if len(sub) else "—")
+                st.markdown(f"**{title}**")
+                st.dataframe(
+                    sub[["code", "name", "turnover_days", "coverage_days",
+                         "current_stock"]].rename(columns={
+                        "code": "Код", "name": "Наименование", "turnover_days": "Оборот, дн",
+                        "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
+                    use_container_width=True, hide_index=True, height=300,
+                    column_config=_slowfast_cfg)
+
+        c1, c2 = st.columns(2)
+        _slowfast_block(c1, "Залежавшиеся (долгий оборот)",
+                        inv.sort_values("turnover_days", ascending=False), "slow_n")
+        _slowfast_block(c2, "Быстрые (короткий оборот)",
+                        inv.sort_values("turnover_days"), "fast_n")
 
 # ---------- Пополнение ----------
 with tab3:
