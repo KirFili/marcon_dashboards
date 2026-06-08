@@ -14,6 +14,7 @@ from core.task2 import (
     load_assortment,
     z_from_service_level,
 )
+from core.theme import ABC_COLORS, BRAND, REPL_EMOJI, chamber_color
 
 st.set_page_config(page_title="Управление запасами", page_icon="🧮", layout="wide")
 require_password()
@@ -66,11 +67,13 @@ if chambers_sel:
 
 sold = f[f["abc"] != "—"].copy()
 
-st.info(
-    "XYZ — с поправкой на сезон (CV десезонализованного ряда по активному периоду SKU). "
-    "История пока ~1 год, по мере накопления данных классы уточнятся. "
-    f"Оборачиваемость и дни покрытия — за загруженный период дневных остатков (**{_days()} дн.**)."
-)
+st.caption(f"Период дневных остатков: **{_days()} дн.**")
+with st.expander("Как считается"):
+    st.markdown(
+        "- **XYZ** — с поправкой на сезон (CV десезонализованного ряда по активному "
+        "периоду SKU). История пока ~1 год, по мере накопления данных классы уточнятся.\n"
+        "- **Оборачиваемость и дни покрытия** — за загруженный период дневных остатков."
+    )
 
 # ---------- KPI ----------
 k1, k2, k3, k4, k5 = st.columns(5)
@@ -108,7 +111,7 @@ with tab1:
         share = sold.groupby("abc")["revenue"].sum().reindex(["A", "B", "C"]).fillna(0)
         figs = px.bar(share.reset_index(), x="abc", y="revenue", title="Выручка по классам ABC",
                       labels={"abc": "Класс", "revenue": "Выручка"}, color="abc",
-                      color_discrete_map={"A": "#1F4E78", "B": "#6A9FB5", "C": "#C9D6DF"})
+                      color_discrete_map=ABC_COLORS)
         figs.update_layout(height=360, margin=dict(t=50), showlegend=False)
         st.plotly_chart(figs, use_container_width=True)
 
@@ -125,10 +128,11 @@ with tab1:
             "coverage_days": "Дни покрытия", "current_stock": "Остаток (ед.)"}),
         use_container_width=True, hide_index=True, height=420,
         column_config={
-            "Выручка": st.column_config.NumberColumn(format="%.0f"),
+            "Выручка": st.column_config.NumberColumn(format="localized"),
             "CV": st.column_config.NumberColumn(format="%.2f"),
             "Оборачиваемость": st.column_config.NumberColumn(format="%.1f"),
             "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
+            "Остаток (ед.)": st.column_config.NumberColumn(format="localized"),
         },
     )
 
@@ -144,7 +148,7 @@ with tab2:
             inv, x="coverage_days", y="turnover", color="abc", hover_name="name",
             hover_data={"code": True, "current_stock": ":,.0f"},
             category_orders={"abc": ["A", "B", "C", "—"]},
-            color_discrete_map={"A": "#1F4E78", "B": "#6A9FB5", "C": "#C9D6DF", "—": "#E0A458"},
+            color_discrete_map=ABC_COLORS,
             labels={"coverage_days": "Дни покрытия", "turnover": "Оборачиваемость", "abc": "ABC"},
             height=420,
         )
@@ -157,16 +161,17 @@ with tab2:
                          current_stock=inv["current_stock"].round(0))
         slow = inv.sort_values("turnover").head(15)
         fast = inv.sort_values("turnover", ascending=False).head(15)
+        _slowfast_cfg = {"Остаток": st.column_config.NumberColumn(format="localized")}
         c1.markdown("**Залежавшиеся (низкая оборачиваемость)**")
         c1.dataframe(slow[["code", "name", "turnover", "coverage_days", "current_stock"]].rename(
             columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
-            use_container_width=True, hide_index=True, height=300)
+            use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
         c2.markdown("**Быстрые (высокая оборачиваемость)**")
         c2.dataframe(fast[["code", "name", "turnover", "coverage_days", "current_stock"]].rename(
             columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
-            use_container_width=True, hide_index=True, height=300)
+            use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
 
 # ---------- Пополнение ----------
 with tab3:
@@ -203,8 +208,11 @@ with tab3:
         cols = ["repl_status", "code", "name", "chamber", "class", "current_stock",
                 "out_mean", "coverage_days", "safety_stock", "reorder_point",
                 "order_qty", "idle_days"]
+        disp = show[cols].copy()
+        disp["repl_status"] = disp["repl_status"].map(
+            lambda s: f"{REPL_EMOJI.get(s, '')} {s}".strip())
         st.dataframe(
-            show[cols].rename(columns={
+            disp.rename(columns={
                 "repl_status": "Статус", "code": "Код 1С", "name": "Наименование",
                 "chamber": "Камера", "class": "Класс", "current_stock": "Остаток",
                 "out_mean": "Спрос/сут", "coverage_days": "Дни покрытия",
@@ -212,12 +220,12 @@ with tab3:
                 "order_qty": "Заказать (ед.)", "idle_days": "Простой, дн"}),
             use_container_width=True, hide_index=True, height=460,
             column_config={
-                "Остаток": st.column_config.NumberColumn(format="%.0f"),
+                "Остаток": st.column_config.NumberColumn(format="localized"),
                 "Спрос/сут": st.column_config.NumberColumn(format="%.2f"),
                 "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
-                "Страх. запас": st.column_config.NumberColumn(format="%.0f"),
-                "Точка заказа": st.column_config.NumberColumn(format="%.0f"),
-                "Заказать (ед.)": st.column_config.NumberColumn(format="%.0f"),
+                "Страх. запас": st.column_config.NumberColumn(format="localized"),
+                "Точка заказа": st.column_config.NumberColumn(format="localized"),
+                "Заказать (ед.)": st.column_config.NumberColumn(format="localized"),
                 "Простой, дн": st.column_config.NumberColumn(format="%.0f"),
             },
         )
@@ -254,7 +262,8 @@ with tab4:
             "is_peak": [m == peak_m for m in range(1, 13)],
         })
         figp = px.bar(prof_df, x="Месяц", y="Коэффициент",
-                      color="is_peak", color_discrete_map={True: "#E0A458", False: "#6A9FB5"},
+                      color="is_peak",
+                      color_discrete_map={True: BRAND["accent"], False: BRAND["secondary"]},
                       category_orders={"Месяц": [_MONTHS_RU[m] for m in range(1, 13)]},
                       title="Сезонный профиль спроса (1.0 = средний месяц)")
         figp.add_hline(y=1.0, line_dash="dot", line_color="#888")
@@ -291,13 +300,13 @@ with tab4:
                     "preorder_qty": "Предзаказ к пику (ед.)"}),
                 use_container_width=True, hide_index=True, height=440,
                 column_config={
-                    "Остаток": st.column_config.NumberColumn(format="%.0f"),
+                    "Остаток": st.column_config.NumberColumn(format="localized"),
                     "Спрос/сут": st.column_config.NumberColumn(format="%.2f"),
                     "Спрос/сут в пик": st.column_config.NumberColumn(format="%.2f"),
                     "Покрытие в пик, дн": st.column_config.NumberColumn(format="%.1f"),
-                    "Точка заказа": st.column_config.NumberColumn(format="%.0f"),
-                    "Точка заказа (пик)": st.column_config.NumberColumn(format="%.0f"),
-                    "Предзаказ к пику (ед.)": st.column_config.NumberColumn(format="%.0f"),
+                    "Точка заказа": st.column_config.NumberColumn(format="localized"),
+                    "Точка заказа (пик)": st.column_config.NumberColumn(format="localized"),
+                    "Предзаказ к пику (ед.)": st.column_config.NumberColumn(format="localized"),
                 },
             )
             st.caption("«Предзаказ к пику» = пиковая точка заказа − текущий остаток. "
@@ -318,8 +327,6 @@ with tab5:
             "Наклон ≤ 0 — запас не растёт, переполнение не грозит."
         )
         capm = dict(zip(cham["chamber"], cham["capacity"]))
-        palette = {"Заморозка СД": "#1F4E78", "Заморозка ТП+ОБЩ": "#2E86AB",
-                   "Охлажденка": "#E0A458"}
         rows = []
         fig = go.Figure()
         for ch in sorted(occ["chamber"].unique()):
@@ -343,7 +350,7 @@ with tab5:
                 "Дней до переполнения": round(dtf) if dtf is not None else None,
                 "Прогноз даты": eta.strftime("%Y-%m-%d") if eta is not None else "—",
             })
-            color = palette.get(ch, "#888")
+            color = chamber_color(ch)
             fig.add_scatter(x=g["day"], y=g["slots"], name=ch, mode="lines",
                             line=dict(color=color))
             if cap:

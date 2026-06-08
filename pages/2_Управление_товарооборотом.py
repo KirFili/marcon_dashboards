@@ -7,6 +7,7 @@ from core.auth import require_password
 from core.fmt import money, num
 from core.metrics import load_chambers, load_facts
 from core.settings import bootstrap_defaults, get_setting
+from core.theme import BRAND, chamber_color_map
 
 st.set_page_config(page_title="Управление товарооборотом", page_icon="📦", layout="wide")
 require_password()
@@ -98,9 +99,10 @@ with tab1:
         revenue=("revenue", "sum"), gross_profit=("gross_profit", "sum")
     ).reset_index()
     fig = go.Figure()
-    fig.add_bar(x=by_m["month"], y=by_m["revenue"], name="Выручка", marker_color="#9DB4C0")
+    fig.add_bar(x=by_m["month"], y=by_m["revenue"], name="Выручка",
+                marker_color=BRAND["secondary"])
     fig.add_bar(x=by_m["month"], y=by_m["gross_profit"], name="Валовая прибыль",
-                marker_color="#1F4E78")
+                marker_color=BRAND["primary"])
     fig.update_layout(barmode="group", title="Выручка и валовая прибыль по месяцам",
                       height=380, legend_orientation="h", margin=dict(t=50))
     st.plotly_chart(fig, use_container_width=True)
@@ -112,7 +114,7 @@ with tab1:
     fig2 = px.line(occ_m, x="month", y="gp_per_slot", markers=True,
                    title="Валовая прибыль на паллетоместо по месяцам (₽/место)")
     fig2.update_layout(height=340, margin=dict(t=50))
-    fig2.update_traces(line_color="#1F4E78")
+    fig2.update_traces(line_color=BRAND["primary"])
     st.plotly_chart(fig2, use_container_width=True)
 
 # ---------- Камеры ----------
@@ -125,10 +127,11 @@ with tab2:
     cap = cham.merge(occ_by_ch, on="chamber", how="left").fillna({"avg_occupied": 0})
     cap["util"] = (100 * cap["avg_occupied"] / cap["capacity"]).round(1)
     fig3 = go.Figure()
-    fig3.add_bar(x=cap["chamber"], y=cap["capacity"], name="Ёмкость", marker_color="#D9E2EC")
+    fig3.add_bar(x=cap["chamber"], y=cap["capacity"], name="Ёмкость",
+                 marker_color=BRAND["light"])
     fig3.add_bar(x=cap["chamber"], y=cap["avg_occupied"], name="Занято (ср/мес)",
-                 marker_color="#1F4E78")
-    fig3.update_layout(barmode="overlay", title="Утилизация камер (паллетоместа)",
+                 marker_color=BRAND["primary"])
+    fig3.update_layout(barmode="group", title="Утилизация камер (паллетоместа)",
                        height=400, legend_orientation="h", margin=dict(t=50))
     st.plotly_chart(fig3, use_container_width=True)
     st.dataframe(
@@ -136,6 +139,10 @@ with tab2:
             "chamber": "Камера", "capacity": "Ёмкость",
             "avg_occupied": "Занято ср/мес", "util": "Утилизация, %"}),
         use_container_width=True, hide_index=True,
+        column_config={
+            "Занято ср/мес": st.column_config.NumberColumn(format="%.0f"),
+            "Утилизация, %": st.column_config.NumberColumn(format="%.1f"),
+        },
     )
 
 # ---------- Рейтинг SKU ----------
@@ -153,21 +160,26 @@ with tab3:
     bot = rank.tail(15).sort_values("gp_per_slot")
     figt = px.bar(top, x="gp_per_slot", y="name", orientation="h",
                   title="Топ-15 по ВП/паллетоместо", height=450)
-    figt.update_traces(marker_color="#1F4E78")
+    figt.update_traces(marker_color=BRAND["primary"])
     figt.update_layout(margin=dict(t=50, l=10), yaxis_title="", xaxis_title="₽/место")
     colA.plotly_chart(figt, use_container_width=True)
     figb = px.bar(bot, x="gp_per_slot", y="name", orientation="h",
                   title="Анти-топ-15 (паразиты места)", height=450)
-    figb.update_traces(marker_color="#C1666B")
+    figb.update_traces(marker_color=BRAND["danger"])
     figb.update_layout(margin=dict(t=50, l=10), yaxis_title="", xaxis_title="₽/место")
     colB.plotly_chart(figb, use_container_width=True)
 
     st.dataframe(
         rank.rename(columns={
             "code": "Код 1С", "name": "Наименование", "chamber": "Камера",
-            "gp": "Валовая прибыль", "slot_months": "Паллето-месяцы",
-            "gp_per_slot": "ВП/паллетоместо"}),
+            "gp": "Валовая прибыль, ₽", "slot_months": "Паллето-месяцы",
+            "gp_per_slot": "ВП/паллетоместо, ₽"}),
         use_container_width=True, hide_index=True, height=400,
+        column_config={
+            "Валовая прибыль, ₽": st.column_config.NumberColumn(format="localized"),
+            "Паллето-месяцы": st.column_config.NumberColumn(format="localized"),
+            "ВП/паллетоместо, ₽": st.column_config.NumberColumn(format="localized"),
+        },
     )
 
 # ---------- Эффективность (scatter) ----------
@@ -191,6 +203,7 @@ with tab4:
         log_x = st.checkbox("Логарифм по оси X (если разброс большой)", value=True)
         fig4 = px.scatter(
             eff, x="avg_slots", y="gp_per_slot", size="revenue", color="chamber",
+            color_discrete_map=chamber_color_map(eff["chamber"].unique()),
             hover_name="name", hover_data={"code": True, "avg_slots": True,
                                            "gp_per_slot": ":,.0f", "revenue": ":,.0f"},
             log_x=log_x, size_max=40, height=560,
@@ -211,6 +224,7 @@ with tab5:
     fig5 = px.line(
         seas, x="mon_name", y=col, color="year", markers=True, height=480,
         category_orders={"mon_name": MONTHS_RU},
+        color_discrete_sequence=[BRAND["primary"], BRAND["accent"], BRAND["secondary"]],
         labels={"mon_name": "Месяц", col: metric, "year": "Год"},
     )
     fig5.update_layout(margin=dict(t=30), legend_orientation="h")
