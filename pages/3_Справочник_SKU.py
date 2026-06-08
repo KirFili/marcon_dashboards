@@ -9,7 +9,6 @@ from core.models import Chamber, Sku
 from core.settings import bootstrap_defaults, get_setting
 from core.sku_fields import OVERRIDABLE, build_ref, effective
 
-st.set_page_config(page_title="Справочник SKU", page_icon="📒", layout="wide")
 require_password()
 bootstrap_defaults()
 
