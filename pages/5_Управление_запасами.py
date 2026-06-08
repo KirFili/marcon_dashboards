@@ -160,9 +160,11 @@ with tab2:
     else:
         st.caption("Оборачиваемость в днях = средний остаток ÷ среднесуточная отгрузка — "
                    "сколько дней единица товара **в среднем лежит на складе** (меньше — лучше). "
-                   "Дни покрытия = текущий остаток ÷ среднесуточная отгрузка.")
+                   "Дни покрытия = текущий остаток ÷ среднесуточная отгрузка. "
+                   "На графике значения оборачиваемости >365 дн показаны как 365 (хвост обрезан).")
+        inv_plot = inv.assign(turnover_days=inv["turnover_days"].clip(upper=365))
         figt = px.scatter(
-            inv, x="coverage_days", y="turnover_days", color="abc", hover_name="name",
+            inv_plot, x="coverage_days", y="turnover_days", color="abc", hover_name="name",
             hover_data={"code": True, "current_stock": ":,.0f"},
             category_orders={"abc": ["A", "B", "C", "—"]},
             color_discrete_map=ABC_COLORS,
@@ -171,6 +173,7 @@ with tab2:
             height=420,
         )
         figt.update_layout(margin=dict(t=30), legend_orientation="h")
+        figt.update_yaxes(range=[-10, 380])
         st.plotly_chart(figt, use_container_width=True)
 
         c1, c2 = st.columns(2)
