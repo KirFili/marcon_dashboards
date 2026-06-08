@@ -14,6 +14,25 @@ st.set_page_config(
 require_password()
 bootstrap_defaults()
 
+# Адаптивный размер KPI-метрик: ужимается на узких экранах, чтобы длинные
+# значения («млрд ₽», «тыс ₽/мес») не обрезались. Применяется ко всем страницам.
+st.markdown(
+    """
+    <style>
+    [data-testid="stMetricValue"] {
+        font-size: clamp(0.85rem, 1.6vw, 1.7rem);
+        line-height: 1.2;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    [data-testid="stMetricLabel"] p {
+        font-size: clamp(0.72rem, 0.95vw, 0.9rem);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 _LOGO = Path(__file__).resolve().parent / "assets" / "stardogs_logo.png"
 
 

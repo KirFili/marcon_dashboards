@@ -83,7 +83,13 @@ k2.metric("Класс A", int((sold["abc"] == "A").sum()))
 k3.metric("Класс B", int((sold["abc"] == "B").sum()))
 k4.metric("Класс C", int((sold["abc"] == "C").sum()))
 turn = f["turnover"].dropna()
-k5.metric("Медиана оборачиваемости", f"{turn.median():.1f}" if len(turn) else "—")
+k5.metric(
+    "Медиана оборачиваемости",
+    f"{turn.median():.1f}×" if len(turn) else "—",
+    help=(f"Сколько раз средний запас обернулся (отгружен и пополнен) за загруженный "
+          f"период ({_days()} дн. ≈ {_days() / 365:.1f} года). Безразмерная величина — "
+          "«раз за период». Медиана по SKU устойчива к выбросам."),
+)
 
 # ---------- расчёт пополнения (общий для вкладок) ----------
 lead_time = int(get_setting("lead_time_days") or 14)
@@ -138,7 +144,8 @@ with tab1:
         column_config={
             "Выручка": st.column_config.NumberColumn(format="localized"),
             "CV": st.column_config.NumberColumn(format="%.2f"),
-            "Оборачиваемость": st.column_config.NumberColumn(format="%.1f"),
+            "Оборачиваемость": st.column_config.NumberColumn(
+                format="%.1f×", help="Раз за период: отгрузка ÷ средний остаток."),
             "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
             "Остаток (ед.)": st.column_config.NumberColumn(format="localized"),
         },
@@ -150,7 +157,8 @@ with tab2:
     if inv.empty:
         st.info("Нет дневных остатков под текущие фильтры.")
     else:
-        st.caption("Оборачиваемость = отгрузка ÷ средний остаток за период (в ед. хранения). "
+        st.caption("Оборачиваемость = отгрузка ÷ средний остаток за период — сколько **раз "
+                   "за период** обернулся запас (безразмерная, в ед. хранения). "
                    "Дни покрытия = текущий остаток ÷ среднесуточная отгрузка.")
         figt = px.scatter(
             inv, x="coverage_days", y="turnover", color="abc", hover_name="name",
@@ -169,7 +177,11 @@ with tab2:
                          current_stock=inv["current_stock"].round(0))
         slow = inv.sort_values("turnover").head(15)
         fast = inv.sort_values("turnover", ascending=False).head(15)
-        _slowfast_cfg = {"Остаток": st.column_config.NumberColumn(format="localized")}
+        _slowfast_cfg = {
+            "Остаток": st.column_config.NumberColumn(format="localized"),
+            "Обор.": st.column_config.NumberColumn(
+                format="%.1f×", help="Раз за период: отгрузка ÷ средний остаток."),
+        }
         c1.markdown("**Залежавшиеся (низкая оборачиваемость)**")
         c1.dataframe(slow[["code", "name", "turnover", "coverage_days", "current_stock"]].rename(
             columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
