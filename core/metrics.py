@@ -69,6 +69,34 @@ def load_facts() -> pd.DataFrame:
     return df
 
 
+def chamber_occupancy_daily() -> pd.DataFrame:
+    """Дневной ряд занятости камер: [day, chamber, slots] — суммарные
+    паллетоместа по камере на каждый день (для тренда и прогноза переполнения).
+    Паллетоместа считаются по среднему остатку дня (нач+кон)/2, как на странице
+    товарооборота.
+    """
+    with SessionLocal() as session:
+        chambers = {c.id: c.name for c in session.scalars(select(Chamber))}
+        skus = {s.id: s for s in session.scalars(select(Sku))}
+        daily = session.scalars(select(StockDaily)).all()
+
+    refs = {sid: _ref(s) for sid, s in skus.items()}
+    rows = []
+    for st in daily:
+        slots = occupancy_slots(refs[st.sku_id], (st.opening + st.closing) / 2.0)
+        if slots is None:
+            continue
+        rows.append({
+            "day": st.day,
+            "chamber": chambers.get(skus[st.sku_id].chamber_id, "—"),
+            "slots": slots,
+        })
+    df = pd.DataFrame(rows, columns=["day", "chamber", "slots"])
+    if df.empty:
+        return df
+    return df.groupby(["day", "chamber"], as_index=False)["slots"].sum()
+
+
 def load_chambers() -> pd.DataFrame:
     with SessionLocal() as session:
         rows = [

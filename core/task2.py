@@ -8,6 +8,7 @@ XYZ — по коэффициенту вариации помесячной вы
 
 from __future__ import annotations
 
+from datetime import date
 from statistics import NormalDist
 
 import numpy as np
@@ -183,6 +184,81 @@ def compute_replenishment(df: pd.DataFrame, lead_time_days: int, z: float,
     )
     d.loc[d["repl_status"] == "Неактивен", "order_qty"] = 0.0
     return d
+
+
+def seasonal_index() -> dict[int, float]:
+    """Сезонный профиль: коэффициент спроса по календарному месяцу (1..12),
+    нормированный к среднему = 1. Считается из совокупной выручки по месяцам
+    (общий профиль по ассортименту — истории по отдельным SKU мало).
+    """
+    with SessionLocal() as session:
+        sales = session.scalars(select(Sale)).all()
+    if not sales:
+        return {}
+    sdf = pd.DataFrame(
+        [{"month": f"{x.period.year:04d}-{x.period.month:02d}", "revenue": x.revenue}
+         for x in sales]
+    )
+    month_total = sdf.groupby("month")["revenue"].sum()
+    cal_groups: dict[int, list[float]] = {}
+    for m, v in month_total.items():
+        cal_groups.setdefault(int(m[5:7]), []).append(float(v))
+    cal_avg = {c: sum(v) / len(v) for c, v in cal_groups.items()}
+    mean_cal = (sum(cal_avg.values()) / len(cal_avg)) if cal_avg else 0.0
+    return {c: (cal_avg[c] / mean_cal if mean_cal else 1.0) for c in cal_avg}
+
+
+def forecast_seasonal_risk(df: pd.DataFrame, lead_time_days: int,
+                           horizon_months: int = 8) -> tuple[pd.DataFrame, dict | None]:
+    """Прогноз дефицита к ближайшему сезонному пику.
+
+    Пик — месяц с максимальным сезонным коэффициентом в горизонте `horizon_months`
+    вперёд от последнего дня данных. В пик дневной спрос ≈ μ·peak_factor, поэтому
+    обычная точка заказа (рассчитанная на средний спрос) занижена. Считаем
+    пиковую точку заказа peak_ROP = μ·peak_factor·L + страховой запас и
+    предзаказ под пик = max(0, peak_ROP − остаток). Также — покрытие текущего
+    остатка в днях при пиковом спросе. Требует колонку `safety_stock` (иначе 0).
+    Возвращает df с колонками прогноза и инфо о пике (или None, если нет истории).
+    """
+    out = df.copy()
+    cols = ["peak_daily", "peak_reorder_point", "preorder_qty", "coverage_at_peak"]
+    for c in cols:
+        out[c] = np.nan
+
+    seas = seasonal_index()
+    with SessionLocal() as session:
+        last_day = session.scalar(select(func.max(StockDaily.day)))
+    if not seas or last_day is None:
+        return out, None
+
+    # месяцы горизонта (с месяца после последнего дня данных)
+    months: list[tuple[int, int]] = []
+    for i in range(1, horizon_months + 1):
+        idx = last_day.month - 1 + i
+        months.append((last_day.year + idx // 12, idx % 12 + 1))
+    peak_y, peak_m = max(months, key=lambda ym: seas.get(ym[1], 1.0))
+    peak_factor = seas.get(peak_m, 1.0)
+    days_to_peak = (date(peak_y, peak_m, 1) - last_day).days
+
+    mu = out["out_mean"].fillna(0.0)
+    stock = out["current_stock"].fillna(0.0)
+    safety = out["safety_stock"].fillna(0.0) if "safety_stock" in out else 0.0
+    peak_daily = mu * peak_factor
+    out["peak_daily"] = peak_daily
+    out["peak_reorder_point"] = peak_daily * lead_time_days + safety
+    out["preorder_qty"] = (out["peak_reorder_point"] - stock).clip(lower=0)
+    out["coverage_at_peak"] = (stock / peak_daily).where(peak_daily > 0)
+
+    info = {
+        "peak_label": f"{peak_y}-{peak_m:02d}",
+        "peak_month": peak_m,
+        "peak_factor": peak_factor,
+        "days_to_peak": days_to_peak,
+        "lead_time": lead_time_days,
+        "last_day": last_day,
+        "seas": seas,
+    }
+    return out, info
 
 
 def daily_period_days() -> int:
