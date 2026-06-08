@@ -4,7 +4,12 @@ import streamlit as st
 
 from core.auth import require_password
 from core.settings import bootstrap_defaults, get_setting
-from core.task2 import daily_period_days, load_assortment
+from core.task2 import (
+    compute_replenishment,
+    daily_period_days,
+    load_assortment,
+    z_from_service_level,
+)
 
 st.set_page_config(page_title="Управление запасами", page_icon="🧮", layout="wide")
 require_password()
@@ -62,7 +67,7 @@ k4.metric("Класс C", int((sold["abc"] == "C").sum()))
 turn = f["turnover"].dropna()
 k5.metric("Медиана оборачиваемости", f"{turn.median():.1f}" if len(turn) else "—")
 
-tab1, tab2 = st.tabs(["ABC / XYZ", "Оборачиваемость"])
+tab1, tab2, tab3 = st.tabs(["ABC / XYZ", "Оборачиваемость", "Пополнение"])
 
 # ---------- ABC / XYZ ----------
 with tab1:
@@ -139,3 +144,65 @@ with tab2:
             columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
             use_container_width=True, hide_index=True, height=300)
+
+# ---------- Пополнение ----------
+with tab3:
+    lead_time = int(get_setting("lead_time_days") or 14)
+    service_level = int(get_setting("service_level_pct") or 95)
+    dead_window = int(get_setting("dead_window_days") or 90)
+    z = z_from_service_level(service_level)
+    rep = compute_replenishment(f, lead_time, z, dead_window)
+
+    st.caption(
+        f"Срок поставки **{lead_time} дн.**, уровень сервиса **{service_level}%** (z={z:.2f}). "
+        "Точка заказа = μ·L + страховой запас; страховой запас = z·σ·√L "
+        "(μ, σ — среднесуточная отгрузка и её разброс). "
+        f"SKU без отгрузок дольше **{dead_window} дн.** помечены «Неактивен». "
+        "Параметры — в [Настройках](Настройки)."
+    )
+
+    order = {"Критично": 0, "Пора заказывать": 1, "OK": 2, "Неактивен": 3, "—": 4}
+    rep = rep.assign(_ord=rep["repl_status"].map(order).fillna(5))
+    live = rep[rep["repl_status"].isin(["Критично", "Пора заказывать", "OK"])]
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("🔴 Критично", int((rep["repl_status"] == "Критично").sum()),
+              help="Остатка не хватит до прихода поставки.")
+    k2.metric("🟠 Пора заказывать", int((rep["repl_status"] == "Пора заказывать").sum()),
+              help="Остаток опустился ниже точки заказа.")
+    k3.metric("🟢 В норме", int((rep["repl_status"] == "OK").sum()))
+    k4.metric("⚪ Неактивных", int((rep["repl_status"] == "Неактивен").sum()),
+              help=f"Нет отгрузок дольше {dead_window} дн. — вероятно сняты с продажи.")
+
+    only_action = st.checkbox(
+        "Только требующие заказа (критично + пора заказывать)", value=True)
+    show = rep[rep["repl_status"].isin(["Критично", "Пора заказывать"])] if only_action \
+        else live
+    show = show.sort_values(["_ord", "coverage_days"])
+
+    if show.empty:
+        st.success("Нет позиций, требующих заказа под текущие фильтры. 👌")
+    else:
+        cols = ["repl_status", "code", "name", "chamber", "class", "current_stock",
+                "out_mean", "coverage_days", "safety_stock", "reorder_point",
+                "order_qty", "idle_days"]
+        st.dataframe(
+            show[cols].rename(columns={
+                "repl_status": "Статус", "code": "Код 1С", "name": "Наименование",
+                "chamber": "Камера", "class": "Класс", "current_stock": "Остаток",
+                "out_mean": "Спрос/сут", "coverage_days": "Дни покрытия",
+                "safety_stock": "Страх. запас", "reorder_point": "Точка заказа",
+                "order_qty": "Заказать (ед.)", "idle_days": "Простой, дн"}),
+            use_container_width=True, hide_index=True, height=460,
+            column_config={
+                "Остаток": st.column_config.NumberColumn(format="%.0f"),
+                "Спрос/сут": st.column_config.NumberColumn(format="%.2f"),
+                "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
+                "Страх. запас": st.column_config.NumberColumn(format="%.0f"),
+                "Точка заказа": st.column_config.NumberColumn(format="%.0f"),
+                "Заказать (ед.)": st.column_config.NumberColumn(format="%.0f"),
+                "Простой, дн": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+        st.caption("«Заказать (ед.)» — сколько докинуть, чтобы вернуться к точке заказа "
+                   "(минимум; объём партии/EOQ — отдельная задача). Единицы — в ед. хранения SKU.")

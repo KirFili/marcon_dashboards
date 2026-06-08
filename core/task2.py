@@ -8,6 +8,8 @@ XYZ — по коэффициенту вариации помесячной вы
 
 from __future__ import annotations
 
+from statistics import NormalDist
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import func, select
@@ -102,12 +104,14 @@ def load_assortment() -> pd.DataFrame:
         columns=["sku_id", "day", "opening", "closing", "outbound"],
     )
     if ddf.empty:
-        inv = pd.DataFrame(columns=["sku_id", "avg_stock", "out_sum", "n_days",
-                                    "current_stock", "turnover", "coverage_days"])
+        inv = pd.DataFrame(columns=["sku_id", "avg_stock", "out_sum", "out_mean",
+                                    "out_std", "n_days", "current_stock",
+                                    "turnover", "coverage_days", "idle_days"])
     else:
         ddf["avg_day"] = (ddf["opening"] + ddf["closing"]) / 2.0
         grp = ddf.groupby("sku_id")
         inv = grp.agg(avg_stock=("avg_day", "mean"), out_sum=("outbound", "sum"),
+                      out_mean=("outbound", "mean"), out_std=("outbound", "std"),
                       n_days=("day", "nunique")).reset_index()
         # текущий остаток = closing на последний день
         last = ddf.sort_values("day").groupby("sku_id").tail(1)[["sku_id", "closing"]]
@@ -115,6 +119,12 @@ def load_assortment() -> pd.DataFrame:
         inv["turnover"] = (inv["out_sum"] / inv["avg_stock"]).where(inv["avg_stock"] > 0)
         avg_daily_out = inv["out_sum"] / inv["n_days"]
         inv["coverage_days"] = (inv["current_stock"] / avg_daily_out).where(avg_daily_out > 0)
+        # дней простоя = с последней отгрузки (outbound>0) до последнего дня в БД
+        max_day = ddf["day"].max()
+        last_move = ddf[ddf["outbound"] > 0].groupby("sku_id")["day"].max()
+        inv["idle_days"] = inv["sku_id"].map(
+            lambda s: (max_day - last_move[s]).days if s in last_move.index else None
+        )
 
     # --- объединяем + мета ---
     meta = pd.DataFrame([
@@ -128,6 +138,51 @@ def load_assortment() -> pd.DataFrame:
     df["xyz"] = df["xyz"].fillna("—")
     df["class"] = df["abc"] + df["xyz"]
     return df
+
+
+def z_from_service_level(pct: float) -> float:
+    """z-фактор (квантиль нормали) для целевого уровня сервиса в %.
+
+    95% → ≈1.645. Ограничиваем (50%, 99.9%), чтобы не уйти в бесконечность.
+    """
+    p = min(max(pct / 100.0, 0.5), 0.999)
+    return NormalDist().inv_cdf(p)
+
+
+def compute_replenishment(df: pd.DataFrame, lead_time_days: int, z: float,
+                          dead_window_days: int = 90) -> pd.DataFrame:
+    """Добавляет к ассортименту страховой запас, точку заказа, рекомендацию.
+
+    Спрос — дневная отгрузка из `stock_daily` (μ, σ за загруженный период).
+    SS = z·σ·√L; точка заказа ROP = μ·L + SS; рекоменд. заказ = max(0, ROP − остаток).
+    Статус: остаток ≤ μ·L → «Критично» (не доживёт до поставки),
+    ≤ ROP → «Пора заказывать», иначе «OK».
+    SKU без отгрузок дольше `dead_window_days` → «Неактивен» (не предлагаем заказ —
+    скорее всего снят/распродан). «—» — нет дневной истории продаж.
+    """
+    d = df.copy()
+    mu = d["out_mean"].fillna(0.0)
+    sigma = d["out_std"].fillna(0.0)
+    stock = d["current_stock"].fillna(0.0)
+    idle = d["idle_days"]
+    sqrt_l = float(lead_time_days) ** 0.5
+
+    d["lead_demand"] = mu * lead_time_days
+    d["safety_stock"] = z * sigma * sqrt_l
+    d["reorder_point"] = d["lead_demand"] + d["safety_stock"]
+    d["order_qty"] = (d["reorder_point"] - stock).clip(lower=0)
+
+    has_demand = d["out_mean"].notna() & (mu > 0)
+    dead = idle.notna() & (idle > dead_window_days)
+    status = np.where(
+        stock <= d["lead_demand"], "Критично",
+        np.where(stock <= d["reorder_point"], "Пора заказывать", "OK"),
+    )
+    d["repl_status"] = np.where(
+        has_demand, np.where(dead, "Неактивен", status), "—"
+    )
+    d.loc[d["repl_status"] == "Неактивен", "order_qty"] = 0.0
+    return d
 
 
 def daily_period_days() -> int:
