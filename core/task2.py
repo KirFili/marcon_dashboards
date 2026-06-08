@@ -107,7 +107,8 @@ def load_assortment() -> pd.DataFrame:
     if ddf.empty:
         inv = pd.DataFrame(columns=["sku_id", "avg_stock", "out_sum", "out_mean",
                                     "out_std", "n_days", "current_stock",
-                                    "turnover", "coverage_days", "idle_days"])
+                                    "turnover", "turnover_days", "coverage_days",
+                                    "idle_days"])
     else:
         ddf["avg_day"] = (ddf["opening"] + ddf["closing"]) / 2.0
         grp = ddf.groupby("sku_id")
@@ -119,6 +120,8 @@ def load_assortment() -> pd.DataFrame:
         inv = inv.merge(last.rename(columns={"closing": "current_stock"}), on="sku_id")
         inv["turnover"] = (inv["out_sum"] / inv["avg_stock"]).where(inv["avg_stock"] > 0)
         avg_daily_out = inv["out_sum"] / inv["n_days"]
+        # период оборота в днях = средний остаток ÷ среднесуточная отгрузка
+        inv["turnover_days"] = (inv["avg_stock"] / avg_daily_out).where(avg_daily_out > 0)
         inv["coverage_days"] = (inv["current_stock"] / avg_daily_out).where(avg_daily_out > 0)
         # дней простоя = с последней отгрузки (outbound>0) до последнего дня в БД
         max_day = ddf["day"].max()

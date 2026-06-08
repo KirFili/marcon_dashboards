@@ -82,13 +82,13 @@ k1.metric("Продаваемых SKU", len(sold))
 k2.metric("Класс A", int((sold["abc"] == "A").sum()))
 k3.metric("Класс B", int((sold["abc"] == "B").sum()))
 k4.metric("Класс C", int((sold["abc"] == "C").sum()))
-turn = f["turnover"].dropna()
+turn = f["turnover_days"].dropna()
 k5.metric(
-    "Медиана оборачиваемости",
-    f"{turn.median():.1f}×" if len(turn) else "—",
-    help=(f"Сколько раз средний запас обернулся (отгружен и пополнен) за загруженный "
-          f"период ({_days()} дн. ≈ {_days() / 365:.1f} года). Безразмерная величина — "
-          "«раз за период». Медиана по SKU устойчива к выбросам."),
+    "Медиана оборачиваемости, дн",
+    f"{turn.median():.0f} дн" if len(turn) else "—",
+    help=("Период оборота: сколько дней единица товара в среднем лежит на складе "
+          "(средний остаток ÷ среднесуточная отгрузка). Меньше — лучше. "
+          "Медиана по SKU устойчива к выбросам."),
 )
 
 # ---------- расчёт пополнения (общий для вкладок) ----------
@@ -131,21 +131,22 @@ with tab1:
                "Z — нерегулярный. «—» — мало истории. Пороги — в Настройках.")
     show = sold.sort_values("revenue", ascending=False)[[
         "code", "name", "chamber", "revenue", "abc", "cv", "xyz", "class",
-        "turnover", "coverage_days", "current_stock"]]
+        "turnover_days", "coverage_days", "current_stock"]]
     show = table_filters(show, key="abc", search_cols=("code", "name"),
                          cat_cols=("chamber", "abc", "xyz"))
     st.dataframe(
         show.rename(columns={
             "code": "Код 1С", "name": "Наименование", "chamber": "Камера",
             "revenue": "Выручка", "abc": "ABC", "cv": "CV", "xyz": "XYZ",
-            "class": "Класс", "turnover": "Оборачиваемость",
+            "class": "Класс", "turnover_days": "Оборачиваемость, дн",
             "coverage_days": "Дни покрытия", "current_stock": "Остаток (ед.)"}),
         use_container_width=True, hide_index=True, height=420,
         column_config={
             "Выручка": st.column_config.NumberColumn(format="localized"),
             "CV": st.column_config.NumberColumn(format="%.2f"),
-            "Оборачиваемость": st.column_config.NumberColumn(
-                format="%.1f×", help="Раз за период: отгрузка ÷ средний остаток."),
+            "Оборачиваемость, дн": st.column_config.NumberColumn(
+                format="%.0f", help="Период оборота в днях: средний остаток ÷ "
+                "среднесуточная отгрузка. Меньше — лучше."),
             "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
             "Остаток (ед.)": st.column_config.NumberColumn(format="localized"),
         },
@@ -153,43 +154,45 @@ with tab1:
 
 # ---------- Оборачиваемость ----------
 with tab2:
-    inv = f[f["turnover"].notna()].copy()
+    inv = f[f["turnover_days"].notna()].copy()
     if inv.empty:
         st.info("Нет дневных остатков под текущие фильтры.")
     else:
-        st.caption("Оборачиваемость = отгрузка ÷ средний остаток за период — сколько **раз "
-                   "за период** обернулся запас (безразмерная, в ед. хранения). "
+        st.caption("Оборачиваемость в днях = средний остаток ÷ среднесуточная отгрузка — "
+                   "сколько дней единица товара **в среднем лежит на складе** (меньше — лучше). "
                    "Дни покрытия = текущий остаток ÷ среднесуточная отгрузка.")
         figt = px.scatter(
-            inv, x="coverage_days", y="turnover", color="abc", hover_name="name",
+            inv, x="coverage_days", y="turnover_days", color="abc", hover_name="name",
             hover_data={"code": True, "current_stock": ":,.0f"},
             category_orders={"abc": ["A", "B", "C", "—"]},
             color_discrete_map=ABC_COLORS,
-            labels={"coverage_days": "Дни покрытия", "turnover": "Оборачиваемость", "abc": "ABC"},
+            labels={"coverage_days": "Дни покрытия", "turnover_days": "Оборачиваемость, дн",
+                    "abc": "ABC"},
             height=420,
         )
         figt.update_layout(margin=dict(t=30), legend_orientation="h")
         st.plotly_chart(figt, use_container_width=True)
 
         c1, c2 = st.columns(2)
-        inv = inv.assign(turnover=inv["turnover"].round(1),
+        inv = inv.assign(turnover_days=inv["turnover_days"].round(0),
                          coverage_days=inv["coverage_days"].round(1),
                          current_stock=inv["current_stock"].round(0))
-        slow = inv.sort_values("turnover").head(15)
-        fast = inv.sort_values("turnover", ascending=False).head(15)
+        slow = inv.sort_values("turnover_days", ascending=False).head(15)
+        fast = inv.sort_values("turnover_days").head(15)
         _slowfast_cfg = {
             "Остаток": st.column_config.NumberColumn(format="localized"),
-            "Обор.": st.column_config.NumberColumn(
-                format="%.1f×", help="Раз за период: отгрузка ÷ средний остаток."),
+            "Оборот, дн": st.column_config.NumberColumn(
+                format="%.0f", help="Период оборота в днях: средний остаток ÷ "
+                "среднесуточная отгрузка."),
         }
-        c1.markdown("**Залежавшиеся (низкая оборачиваемость)**")
-        c1.dataframe(slow[["code", "name", "turnover", "coverage_days", "current_stock"]].rename(
-            columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
+        c1.markdown("**Залежавшиеся (долгий оборот)**")
+        c1.dataframe(slow[["code", "name", "turnover_days", "coverage_days", "current_stock"]].rename(
+            columns={"code": "Код", "name": "Наименование", "turnover_days": "Оборот, дн",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
             use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
-        c2.markdown("**Быстрые (высокая оборачиваемость)**")
-        c2.dataframe(fast[["code", "name", "turnover", "coverage_days", "current_stock"]].rename(
-            columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
+        c2.markdown("**Быстрые (короткий оборот)**")
+        c2.dataframe(fast[["code", "name", "turnover_days", "coverage_days", "current_stock"]].rename(
+            columns={"code": "Код", "name": "Наименование", "turnover_days": "Оборот, дн",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
             use_container_width=True, hide_index=True, height=300, column_config=_slowfast_cfg)
 
