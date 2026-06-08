@@ -8,8 +8,8 @@ from core.fmt import money, num
 from core.metrics import load_chambers, load_facts
 from core.settings import bootstrap_defaults, get_setting
 from core.theme import BRAND, chamber_color_map
+from core.ui import table_filters
 
-st.set_page_config(page_title="Управление товарооборотом", page_icon="📦", layout="wide")
 require_password()
 bootstrap_defaults()
 
@@ -52,10 +52,12 @@ with st.sidebar:
         m_from = m_to = months[0]
     base = df[df["group2"].isin(scope)] if only_profile else df
     chambers_sel = st.multiselect(
-        "Камеры", sorted(base["chamber"].dropna().unique()), default=[]
+        "Камеры", sorted(base["chamber"].dropna().unique()), default=[],
+        placeholder="Выберите камеры",
     )
     groups_sel = st.multiselect(
-        "Групировка по видам", sorted(base["group_kind"].dropna().unique()), default=[]
+        "Групировка по видам", sorted(base["group_kind"].dropna().unique()), default=[],
+        placeholder="Выберите группы",
     )
     if st.button("Обновить данные"):
         st.cache_data.clear()
@@ -169,8 +171,10 @@ with tab3:
     figb.update_layout(margin=dict(t=50, l=10), yaxis_title="", xaxis_title="₽/место")
     colB.plotly_chart(figb, use_container_width=True)
 
+    rank_f = table_filters(rank, key="rank", search_cols=("code", "name"),
+                           cat_cols=("chamber",))
     st.dataframe(
-        rank.rename(columns={
+        rank_f.rename(columns={
             "code": "Код 1С", "name": "Наименование", "chamber": "Камера",
             "gp": "Валовая прибыль, ₽", "slot_months": "Паллето-месяцы",
             "gp_per_slot": "ВП/паллетоместо, ₽"}),

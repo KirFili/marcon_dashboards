@@ -13,7 +13,6 @@ from core.ingest import import_sales, import_skus, import_stock_daily
 from core.models import Sale, Sku, StockDaily, Upload
 from core.settings import bootstrap_defaults
 
-st.set_page_config(page_title="Загрузка данных", page_icon="📥", layout="wide")
 require_password()
 bootstrap_defaults()
 

@@ -7,7 +7,6 @@ from core.db import SessionLocal
 from core.models import Chamber
 from core.settings import bootstrap_defaults, get_setting, set_setting
 
-st.set_page_config(page_title="Настройки", page_icon="⚙️", layout="wide")
 require_password()
 bootstrap_defaults()
 

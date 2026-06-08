@@ -15,8 +15,8 @@ from core.task2 import (
     z_from_service_level,
 )
 from core.theme import ABC_COLORS, BRAND, REPL_EMOJI, chamber_color
+from core.ui import table_filters
 
-st.set_page_config(page_title="Управление запасами", page_icon="🧮", layout="wide")
 require_password()
 bootstrap_defaults()
 
@@ -61,7 +61,8 @@ with c2:
         st.rerun()
 f = df[df["group2"].isin(scope)] if only_profile else df
 with c3:
-    chambers_sel = st.multiselect("Камеры", sorted(f["chamber"].dropna().unique()), default=[])
+    chambers_sel = st.multiselect("Камеры", sorted(f["chamber"].dropna().unique()),
+                                  default=[], placeholder="Выберите камеры")
 if chambers_sel:
     f = f[f["chamber"].isin(chambers_sel)]
 
@@ -115,11 +116,18 @@ with tab1:
         figs.update_layout(height=360, margin=dict(t=50), showlegend=False)
         st.plotly_chart(figs, use_container_width=True)
 
-    st.caption("A — топ по выручке (≤80% накопл.), B — ≤95%, C — хвост. "
-               "X — ровный спрос, Y — умеренно, Z — нерегулярный. «—» — мало истории.")
+    _abc_a = int(get_setting("abc_a_pct") or 80)
+    _abc_b = int(get_setting("abc_b_pct") or 95)
+    _xyz_x = int(get_setting("xyz_x_pct") or 10)
+    _xyz_y = int(get_setting("xyz_y_pct") or 25)
+    st.caption(f"A — топ по выручке (≤{_abc_a}% накопл.), B — ≤{_abc_b}%, C — хвост. "
+               f"X — ровный спрос (CV≤{_xyz_x}%), Y — умеренно (≤{_xyz_y}%), "
+               "Z — нерегулярный. «—» — мало истории. Пороги — в Настройках.")
     show = sold.sort_values("revenue", ascending=False)[[
         "code", "name", "chamber", "revenue", "abc", "cv", "xyz", "class",
         "turnover", "coverage_days", "current_stock"]]
+    show = table_filters(show, key="abc", search_cols=("code", "name"),
+                         cat_cols=("chamber", "abc", "xyz"))
     st.dataframe(
         show.rename(columns={
             "code": "Код 1С", "name": "Наименование", "chamber": "Камера",
@@ -201,6 +209,8 @@ with tab3:
     show = rep[rep["repl_status"].isin(["Критично", "Пора заказывать"])] if only_action \
         else live
     show = show.sort_values(["_ord", "coverage_days"])
+    show = table_filters(show, key="repl", search_cols=("code", "name"),
+                         cat_cols=("chamber", "repl_status", "class"))
 
     if show.empty:
         st.success("Нет позиций, требующих заказа под текущие фильтры. 👌")
@@ -284,6 +294,8 @@ with tab4:
             "Только «сейчас в норме, но к пику не хватит»", value=True)
         show = new_peak if only_new else need
         show = show.sort_values("preorder_qty", ascending=False)
+        show = table_filters(show, key="seasonal", search_cols=("code", "name"),
+                             cat_cols=("chamber", "class"))
 
         if show.empty:
             st.success("Нет позиций с сезонным риском под текущие фильтры. 👌")
