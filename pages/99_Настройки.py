@@ -89,6 +89,35 @@ if st.button("Сохранить пороги ABC/XYZ", type="primary"):
 
 st.divider()
 
+# ---------- Пополнение запасов ----------
+st.subheader("Пополнение запасов")
+st.caption("Страховой запас = z·σ·√L, точка заказа = μ·L + страховой запас. "
+           "μ, σ — среднесуточная отгрузка и её разброс; L — срок поставки; "
+           "z — из уровня сервиса. SKU без отгрузок дольше «окна индекса мёртвости» "
+           "считаются снятыми и в заказ не предлагаются.")
+r1, r2 = st.columns(2)
+with r1:
+    lead_time = st.number_input(
+        "Срок поставки (заказ→приход), дней",
+        min_value=1, max_value=180,
+        value=int(get_setting("lead_time_days") or 14), step=1,
+        help="За сколько дней заказ доезжает на склад. Влияет на точку заказа и страховой запас.",
+    )
+with r2:
+    service_level = st.number_input(
+        "Целевой уровень сервиса, %",
+        min_value=50, max_value=99,
+        value=int(get_setting("service_level_pct") or 95), step=1,
+        help="Вероятность не уйти в дефицит за срок поставки. Выше уровень → больше страховой запас.",
+    )
+
+if st.button("Сохранить параметры пополнения", type="primary"):
+    set_setting("lead_time_days", lead_time, "int")
+    set_setting("service_level_pct", service_level, "int")
+    st.toast("Параметры пополнения сохранены", icon="✅")
+
+st.divider()
+
 # ---------- Камеры хранения ----------
 st.subheader("Камеры хранения")
 st.caption(

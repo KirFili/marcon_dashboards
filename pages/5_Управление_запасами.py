@@ -1,10 +1,19 @@
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_password
+from core.metrics import chamber_occupancy_daily, load_chambers
 from core.settings import bootstrap_defaults, get_setting
-from core.task2 import daily_period_days, load_assortment
+from core.task2 import (
+    compute_replenishment,
+    daily_period_days,
+    forecast_seasonal_risk,
+    load_assortment,
+    z_from_service_level,
+)
 
 st.set_page_config(page_title="Управление запасами", page_icon="🧮", layout="wide")
 require_password()
@@ -22,6 +31,16 @@ def _data():
 @st.cache_data(ttl=600)
 def _days():
     return daily_period_days()
+
+
+@st.cache_data(ttl=600)
+def _occ_daily():
+    return chamber_occupancy_daily()
+
+
+@st.cache_data(ttl=600)
+def _chambers():
+    return load_chambers()
 
 
 df = _data()
@@ -62,7 +81,16 @@ k4.metric("Класс C", int((sold["abc"] == "C").sum()))
 turn = f["turnover"].dropna()
 k5.metric("Медиана оборачиваемости", f"{turn.median():.1f}" if len(turn) else "—")
 
-tab1, tab2 = st.tabs(["ABC / XYZ", "Оборачиваемость"])
+# ---------- расчёт пополнения (общий для вкладок) ----------
+lead_time = int(get_setting("lead_time_days") or 14)
+service_level = int(get_setting("service_level_pct") or 95)
+dead_window = int(get_setting("dead_window_days") or 90)
+z = z_from_service_level(service_level)
+rep = compute_replenishment(f, lead_time, z, dead_window)
+
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "ABC / XYZ", "Оборачиваемость", "Пополнение",
+    "Сезонный риск", "Переполнение камер"])
 
 # ---------- ABC / XYZ ----------
 with tab1:
@@ -139,3 +167,204 @@ with tab2:
             columns={"code": "Код", "name": "Наименование", "turnover": "Обор.",
                      "coverage_days": "Дни покр.", "current_stock": "Остаток"}),
             use_container_width=True, hide_index=True, height=300)
+
+# ---------- Пополнение ----------
+with tab3:
+    st.caption(
+        f"Срок поставки **{lead_time} дн.**, уровень сервиса **{service_level}%** (z={z:.2f}). "
+        "Точка заказа = μ·L + страховой запас; страховой запас = z·σ·√L "
+        "(μ, σ — среднесуточная отгрузка и её разброс). "
+        f"SKU без отгрузок дольше **{dead_window} дн.** помечены «Неактивен». "
+        "Параметры — в [Настройках](Настройки)."
+    )
+
+    order = {"Критично": 0, "Пора заказывать": 1, "OK": 2, "Неактивен": 3, "—": 4}
+    rep = rep.assign(_ord=rep["repl_status"].map(order).fillna(5))
+    live = rep[rep["repl_status"].isin(["Критично", "Пора заказывать", "OK"])]
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("🔴 Критично", int((rep["repl_status"] == "Критично").sum()),
+              help="Остатка не хватит до прихода поставки.")
+    k2.metric("🟠 Пора заказывать", int((rep["repl_status"] == "Пора заказывать").sum()),
+              help="Остаток опустился ниже точки заказа.")
+    k3.metric("🟢 В норме", int((rep["repl_status"] == "OK").sum()))
+    k4.metric("⚪ Неактивных", int((rep["repl_status"] == "Неактивен").sum()),
+              help=f"Нет отгрузок дольше {dead_window} дн. — вероятно сняты с продажи.")
+
+    only_action = st.checkbox(
+        "Только требующие заказа (критично + пора заказывать)", value=True)
+    show = rep[rep["repl_status"].isin(["Критично", "Пора заказывать"])] if only_action \
+        else live
+    show = show.sort_values(["_ord", "coverage_days"])
+
+    if show.empty:
+        st.success("Нет позиций, требующих заказа под текущие фильтры. 👌")
+    else:
+        cols = ["repl_status", "code", "name", "chamber", "class", "current_stock",
+                "out_mean", "coverage_days", "safety_stock", "reorder_point",
+                "order_qty", "idle_days"]
+        st.dataframe(
+            show[cols].rename(columns={
+                "repl_status": "Статус", "code": "Код 1С", "name": "Наименование",
+                "chamber": "Камера", "class": "Класс", "current_stock": "Остаток",
+                "out_mean": "Спрос/сут", "coverage_days": "Дни покрытия",
+                "safety_stock": "Страх. запас", "reorder_point": "Точка заказа",
+                "order_qty": "Заказать (ед.)", "idle_days": "Простой, дн"}),
+            use_container_width=True, hide_index=True, height=460,
+            column_config={
+                "Остаток": st.column_config.NumberColumn(format="%.0f"),
+                "Спрос/сут": st.column_config.NumberColumn(format="%.2f"),
+                "Дни покрытия": st.column_config.NumberColumn(format="%.1f"),
+                "Страх. запас": st.column_config.NumberColumn(format="%.0f"),
+                "Точка заказа": st.column_config.NumberColumn(format="%.0f"),
+                "Заказать (ед.)": st.column_config.NumberColumn(format="%.0f"),
+                "Простой, дн": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+        st.caption("«Заказать (ед.)» — сколько докинуть, чтобы вернуться к точке заказа "
+                   "(минимум; объём партии/EOQ — отдельная задача). Единицы — в ед. хранения SKU.")
+
+# ---------- Сезонный риск ----------
+_MONTHS_RU = {1: "январь", 2: "февраль", 3: "март", 4: "апрель", 5: "май",
+              6: "июнь", 7: "июль", 8: "август", 9: "сентябрь", 10: "октябрь",
+              11: "ноябрь", 12: "декабрь"}
+
+with tab4:
+    fc, info = forecast_seasonal_risk(rep, lead_time)
+    if info is None:
+        st.info("Недостаточно данных для сезонного прогноза (нужны продажи и остатки).")
+    else:
+        peak_m = info["peak_month"]
+        peak_year = int(info["peak_label"][:4])
+        days_to_peak = info["days_to_peak"]
+        order_in = max(0, days_to_peak - lead_time)
+        st.caption(
+            f"Ближайший сезонный пик — **{_MONTHS_RU[peak_m]} {peak_year}** "
+            f"(спрос ×{info['peak_factor']:.2f} к среднему), через **{days_to_peak} дн.** "
+            f"В пик дневной спрос выше, поэтому обычная точка заказа занижена: считаем "
+            f"пиковую точку заказа = μ·×{info['peak_factor']:.2f}·{lead_time} + страховой запас. "
+            f"Заказывать под пик — примерно через **{order_in} дн.** (за {lead_time} дн. до пика). "
+            "Сезонный профиль — общий по ассортименту (истории по SKU мало)."
+        )
+
+        seas = info["seas"]
+        prof_df = pd.DataFrame({
+            "Месяц": [_MONTHS_RU[m] for m in range(1, 13)],
+            "Коэффициент": [round(seas.get(m, 1.0), 2) for m in range(1, 13)],
+            "is_peak": [m == peak_m for m in range(1, 13)],
+        })
+        figp = px.bar(prof_df, x="Месяц", y="Коэффициент",
+                      color="is_peak", color_discrete_map={True: "#E0A458", False: "#6A9FB5"},
+                      category_orders={"Месяц": [_MONTHS_RU[m] for m in range(1, 13)]},
+                      title="Сезонный профиль спроса (1.0 = средний месяц)")
+        figp.add_hline(y=1.0, line_dash="dot", line_color="#888")
+        figp.update_layout(height=300, margin=dict(t=50), showlegend=False)
+        st.plotly_chart(figp, use_container_width=True)
+
+        live = fc[~fc["repl_status"].isin(["Неактивен", "—"])]
+        need = live[live["preorder_qty"] > 0]
+        new_peak = need[need["repl_status"] == "OK"]
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Нужен запас под пик", len(need),
+                  help="Остаток ниже пиковой точки заказа.")
+        s2.metric("Из них «сейчас в норме»", len(new_peak),
+                  help="По обычным правилам OK, но к пику запаса не хватит — спланировать закупку заранее.")
+        s3.metric("Дней до пика", days_to_peak)
+
+        only_new = st.checkbox(
+            "Только «сейчас в норме, но к пику не хватит»", value=True)
+        show = new_peak if only_new else need
+        show = show.sort_values("preorder_qty", ascending=False)
+
+        if show.empty:
+            st.success("Нет позиций с сезонным риском под текущие фильтры. 👌")
+        else:
+            cols = ["code", "name", "chamber", "class", "current_stock", "out_mean",
+                    "peak_daily", "coverage_at_peak", "reorder_point",
+                    "peak_reorder_point", "preorder_qty"]
+            st.dataframe(
+                show[cols].rename(columns={
+                    "code": "Код 1С", "name": "Наименование", "chamber": "Камера",
+                    "class": "Класс", "current_stock": "Остаток", "out_mean": "Спрос/сут",
+                    "peak_daily": "Спрос/сут в пик", "coverage_at_peak": "Покрытие в пик, дн",
+                    "reorder_point": "Точка заказа", "peak_reorder_point": "Точка заказа (пик)",
+                    "preorder_qty": "Предзаказ к пику (ед.)"}),
+                use_container_width=True, hide_index=True, height=440,
+                column_config={
+                    "Остаток": st.column_config.NumberColumn(format="%.0f"),
+                    "Спрос/сут": st.column_config.NumberColumn(format="%.2f"),
+                    "Спрос/сут в пик": st.column_config.NumberColumn(format="%.2f"),
+                    "Покрытие в пик, дн": st.column_config.NumberColumn(format="%.1f"),
+                    "Точка заказа": st.column_config.NumberColumn(format="%.0f"),
+                    "Точка заказа (пик)": st.column_config.NumberColumn(format="%.0f"),
+                    "Предзаказ к пику (ед.)": st.column_config.NumberColumn(format="%.0f"),
+                },
+            )
+            st.caption("«Предзаказ к пику» = пиковая точка заказа − текущий остаток. "
+                       "Покрытие в пик — на сколько дней хватит текущего остатка при пиковом спросе.")
+
+# ---------- Переполнение камер ----------
+with tab5:
+    occ = _occ_daily()
+    cham = _chambers()
+    if occ.empty:
+        st.info("Нет дневных остатков для расчёта занятости камер.")
+    else:
+        window = st.select_slider("Окно тренда (последние дни)",
+                                  options=[30, 60, 90, 120], value=60)
+        st.caption(
+            f"Занятость камер по дням (паллетоместа). Тренд — линейная аппроксимация по "
+            f"последним **{window} дн.**, экстраполяция до ёмкости даёт «дней до переполнения». "
+            "Наклон ≤ 0 — запас не растёт, переполнение не грозит."
+        )
+        capm = dict(zip(cham["chamber"], cham["capacity"]))
+        palette = {"Заморозка СД": "#1F4E78", "Заморозка ТП+ОБЩ": "#2E86AB",
+                   "Охлажденка": "#E0A458"}
+        rows = []
+        fig = go.Figure()
+        for ch in sorted(occ["chamber"].unique()):
+            g = occ[occ["chamber"] == ch].sort_values("day")
+            win = g.tail(window)
+            y = win["slots"].to_numpy(dtype=float)
+            cur = float(y[-1])
+            cap = float(capm.get(ch, 0) or 0)
+            slope = float(np.polyfit(np.arange(len(y)), y, 1)[0]) if len(y) >= 2 else 0.0
+            if cap and cur >= cap:
+                dtf, eta = 0.0, win["day"].iloc[-1]
+            elif slope > 1e-6 and cap:
+                dtf = (cap - cur) / slope
+                eta = win["day"].iloc[-1] + pd.Timedelta(days=round(dtf))
+            else:
+                dtf, eta = None, None
+            rows.append({
+                "Камера": ch, "Занято": round(cur), "Ёмкость": int(cap),
+                "Загрузка, %": round(100 * cur / cap, 1) if cap else None,
+                "Наклон, мест/дн": round(slope, 2),
+                "Дней до переполнения": round(dtf) if dtf is not None else None,
+                "Прогноз даты": eta.strftime("%Y-%m-%d") if eta is not None else "—",
+            })
+            color = palette.get(ch, "#888")
+            fig.add_scatter(x=g["day"], y=g["slots"], name=ch, mode="lines",
+                            line=dict(color=color))
+            if cap:
+                fig.add_hline(y=cap, line_dash="dash", line_color=color, opacity=0.5)
+        fig.update_layout(height=380, margin=dict(t=30), legend_orientation="h",
+                          yaxis_title="Паллетоместа", xaxis_title="")
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("Пунктир — ёмкость камеры. Сезонные колебания видны на ряду; "
+                   "тренд считается только по выбранному окну.")
+
+        summary = pd.DataFrame(rows)
+        st.dataframe(
+            summary, use_container_width=True, hide_index=True,
+            column_config={
+                "Загрузка, %": st.column_config.NumberColumn(format="%.1f"),
+                "Наклон, мест/дн": st.column_config.NumberColumn(format="%.2f"),
+            },
+        )
+        warn = summary[summary["Дней до переполнения"].notna()
+                       & (summary["Дней до переполнения"] <= 90)]
+        if not warn.empty:
+            for _, r in warn.iterrows():
+                st.warning(f"⚠️ {r['Камера']}: при текущем тренде переполнение через "
+                           f"~{int(r['Дней до переполнения'])} дн. ({r['Прогноз даты']}).")

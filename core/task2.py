@@ -8,6 +8,9 @@ XYZ — по коэффициенту вариации помесячной вы
 
 from __future__ import annotations
 
+from datetime import date
+from statistics import NormalDist
+
 import numpy as np
 import pandas as pd
 from sqlalchemy import func, select
@@ -102,12 +105,14 @@ def load_assortment() -> pd.DataFrame:
         columns=["sku_id", "day", "opening", "closing", "outbound"],
     )
     if ddf.empty:
-        inv = pd.DataFrame(columns=["sku_id", "avg_stock", "out_sum", "n_days",
-                                    "current_stock", "turnover", "coverage_days"])
+        inv = pd.DataFrame(columns=["sku_id", "avg_stock", "out_sum", "out_mean",
+                                    "out_std", "n_days", "current_stock",
+                                    "turnover", "coverage_days", "idle_days"])
     else:
         ddf["avg_day"] = (ddf["opening"] + ddf["closing"]) / 2.0
         grp = ddf.groupby("sku_id")
         inv = grp.agg(avg_stock=("avg_day", "mean"), out_sum=("outbound", "sum"),
+                      out_mean=("outbound", "mean"), out_std=("outbound", "std"),
                       n_days=("day", "nunique")).reset_index()
         # текущий остаток = closing на последний день
         last = ddf.sort_values("day").groupby("sku_id").tail(1)[["sku_id", "closing"]]
@@ -115,6 +120,12 @@ def load_assortment() -> pd.DataFrame:
         inv["turnover"] = (inv["out_sum"] / inv["avg_stock"]).where(inv["avg_stock"] > 0)
         avg_daily_out = inv["out_sum"] / inv["n_days"]
         inv["coverage_days"] = (inv["current_stock"] / avg_daily_out).where(avg_daily_out > 0)
+        # дней простоя = с последней отгрузки (outbound>0) до последнего дня в БД
+        max_day = ddf["day"].max()
+        last_move = ddf[ddf["outbound"] > 0].groupby("sku_id")["day"].max()
+        inv["idle_days"] = inv["sku_id"].map(
+            lambda s: (max_day - last_move[s]).days if s in last_move.index else None
+        )
 
     # --- объединяем + мета ---
     meta = pd.DataFrame([
@@ -128,6 +139,126 @@ def load_assortment() -> pd.DataFrame:
     df["xyz"] = df["xyz"].fillna("—")
     df["class"] = df["abc"] + df["xyz"]
     return df
+
+
+def z_from_service_level(pct: float) -> float:
+    """z-фактор (квантиль нормали) для целевого уровня сервиса в %.
+
+    95% → ≈1.645. Ограничиваем (50%, 99.9%), чтобы не уйти в бесконечность.
+    """
+    p = min(max(pct / 100.0, 0.5), 0.999)
+    return NormalDist().inv_cdf(p)
+
+
+def compute_replenishment(df: pd.DataFrame, lead_time_days: int, z: float,
+                          dead_window_days: int = 90) -> pd.DataFrame:
+    """Добавляет к ассортименту страховой запас, точку заказа, рекомендацию.
+
+    Спрос — дневная отгрузка из `stock_daily` (μ, σ за загруженный период).
+    SS = z·σ·√L; точка заказа ROP = μ·L + SS; рекоменд. заказ = max(0, ROP − остаток).
+    Статус: остаток ≤ μ·L → «Критично» (не доживёт до поставки),
+    ≤ ROP → «Пора заказывать», иначе «OK».
+    SKU без отгрузок дольше `dead_window_days` → «Неактивен» (не предлагаем заказ —
+    скорее всего снят/распродан). «—» — нет дневной истории продаж.
+    """
+    d = df.copy()
+    mu = d["out_mean"].fillna(0.0)
+    sigma = d["out_std"].fillna(0.0)
+    stock = d["current_stock"].fillna(0.0)
+    idle = d["idle_days"]
+    sqrt_l = float(lead_time_days) ** 0.5
+
+    d["lead_demand"] = mu * lead_time_days
+    d["safety_stock"] = z * sigma * sqrt_l
+    d["reorder_point"] = d["lead_demand"] + d["safety_stock"]
+    d["order_qty"] = (d["reorder_point"] - stock).clip(lower=0)
+
+    has_demand = d["out_mean"].notna() & (mu > 0)
+    dead = idle.notna() & (idle > dead_window_days)
+    status = np.where(
+        stock <= d["lead_demand"], "Критично",
+        np.where(stock <= d["reorder_point"], "Пора заказывать", "OK"),
+    )
+    d["repl_status"] = np.where(
+        has_demand, np.where(dead, "Неактивен", status), "—"
+    )
+    d.loc[d["repl_status"] == "Неактивен", "order_qty"] = 0.0
+    return d
+
+
+def seasonal_index() -> dict[int, float]:
+    """Сезонный профиль: коэффициент спроса по календарному месяцу (1..12),
+    нормированный к среднему = 1. Считается из совокупной выручки по месяцам
+    (общий профиль по ассортименту — истории по отдельным SKU мало).
+    """
+    with SessionLocal() as session:
+        sales = session.scalars(select(Sale)).all()
+    if not sales:
+        return {}
+    sdf = pd.DataFrame(
+        [{"month": f"{x.period.year:04d}-{x.period.month:02d}", "revenue": x.revenue}
+         for x in sales]
+    )
+    month_total = sdf.groupby("month")["revenue"].sum()
+    cal_groups: dict[int, list[float]] = {}
+    for m, v in month_total.items():
+        cal_groups.setdefault(int(m[5:7]), []).append(float(v))
+    cal_avg = {c: sum(v) / len(v) for c, v in cal_groups.items()}
+    mean_cal = (sum(cal_avg.values()) / len(cal_avg)) if cal_avg else 0.0
+    return {c: (cal_avg[c] / mean_cal if mean_cal else 1.0) for c in cal_avg}
+
+
+def forecast_seasonal_risk(df: pd.DataFrame, lead_time_days: int,
+                           horizon_months: int = 8) -> tuple[pd.DataFrame, dict | None]:
+    """Прогноз дефицита к ближайшему сезонному пику.
+
+    Пик — месяц с максимальным сезонным коэффициентом в горизонте `horizon_months`
+    вперёд от последнего дня данных. В пик дневной спрос ≈ μ·peak_factor, поэтому
+    обычная точка заказа (рассчитанная на средний спрос) занижена. Считаем
+    пиковую точку заказа peak_ROP = μ·peak_factor·L + страховой запас и
+    предзаказ под пик = max(0, peak_ROP − остаток). Также — покрытие текущего
+    остатка в днях при пиковом спросе. Требует колонку `safety_stock` (иначе 0).
+    Возвращает df с колонками прогноза и инфо о пике (или None, если нет истории).
+    """
+    out = df.copy()
+    cols = ["peak_daily", "peak_reorder_point", "preorder_qty", "coverage_at_peak"]
+    for c in cols:
+        out[c] = np.nan
+
+    seas = seasonal_index()
+    with SessionLocal() as session:
+        last_day = session.scalar(select(func.max(StockDaily.day)))
+    if not seas or last_day is None:
+        return out, None
+
+    # месяцы горизонта (с месяца после последнего дня данных)
+    months: list[tuple[int, int]] = []
+    for i in range(1, horizon_months + 1):
+        idx = last_day.month - 1 + i
+        months.append((last_day.year + idx // 12, idx % 12 + 1))
+    peak_y, peak_m = max(months, key=lambda ym: seas.get(ym[1], 1.0))
+    peak_factor = seas.get(peak_m, 1.0)
+    days_to_peak = (date(peak_y, peak_m, 1) - last_day).days
+
+    mu = out["out_mean"].fillna(0.0)
+    stock = out["current_stock"].fillna(0.0)
+    safety = out["safety_stock"].fillna(0.0) if "safety_stock" in out else 0.0
+    peak_daily = mu * peak_factor
+    out["peak_daily"] = peak_daily
+    out["peak_reorder_point"] = peak_daily * lead_time_days + safety
+    out["preorder_qty"] = (out["peak_reorder_point"] - stock).clip(lower=0)
+    out["coverage_at_peak"] = (stock / peak_daily).where(peak_daily > 0)
+
+    info = {
+        "peak_label": f"{peak_y}-{peak_m:02d}",
+        "peak_month": peak_m,
+        "peak_factor": peak_factor,
+        "days_to_peak": days_to_peak,
+        "lead_time": lead_time_days,
+        "last_day": last_day,
+        "seas": seas,
+    }
+    return out, info
 
 
 def daily_period_days() -> int:

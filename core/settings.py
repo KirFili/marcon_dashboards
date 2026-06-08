@@ -15,6 +15,10 @@ DEFAULT_SETTINGS: dict[str, tuple[str, str]] = {
     # XYZ: верхние границы коэффициента вариации для классов X и Y, %
     "xyz_x_pct": ("10", "int"),
     "xyz_y_pct": ("25", "int"),
+    # Пополнение: срок поставки (заказ→приход), дней
+    "lead_time_days": ("14", "int"),
+    # Пополнение: целевой уровень сервиса (вероятность не уйти в дефицит), %
+    "service_level_pct": ("95", "int"),
 }
 
 DEFAULT_CHAMBERS: list[tuple[str, float, int, int]] = [
