@@ -79,6 +79,7 @@ def import_skus(path: str | Path, *, force: bool = False, session=None) -> dict:
                 for k, v in vals.items():
                     if v not in (None, ""):  # «ручное только в пустое»
                         setattr(sku, k, v)
+                sku.is_draft = False  # появилась карточка 1С — больше не черновик
                 updated += 1
 
         if not force:
@@ -124,18 +125,29 @@ def import_sales(
             session.execute(delete(Sale).where(Sale.period.in_(months)))
 
         created = skipped_no_sku = 0
+        new_skus: list[str] = []
         for r in rows:
             sid = sku_ids.get(r.code)
             if sid is None:
-                skipped_no_sku += 1
-                continue
+                if not r.code:  # без кода черновик не завести
+                    skipped_no_sku += 1
+                    continue
+                # позиции нет в справочнике 1С — заводим черновик (код+имя),
+                # упаковку/камеру дозаполнят вручную в редакторе справочника
+                draft = Sku(code=r.code, name=r.name, is_draft=True)
+                session.add(draft)
+                session.flush()
+                sid = draft.id
+                sku_ids[r.code] = sid
+                new_skus.append(f"{r.code} — {r.name}")
             session.add(Sale(sku_id=sid, period=r.period, revenue=r.revenue,
                              gross_profit=r.gross_profit, upload_id=upload.id))
             created += 1
         session.commit()
         return {"skipped": False, "parsed": len(rows), "created": created,
-                "replaced_months": len(months),
-                "months": [str(m) for m in months], "skipped_no_sku": skipped_no_sku}
+                "replaced_months": len(months), "months": [str(m) for m in months],
+                "skipped_no_sku": skipped_no_sku,
+                "created_sku": len(new_skus), "new_skus": new_skus}
     finally:
         if own:
             session.close()
@@ -171,11 +183,21 @@ def import_stock_daily(
             for s in session.scalars(select(StockDaily).where(StockDaily.day == day))
         }
         created = updated = skipped_no_sku = 0
+        new_skus: list[str] = []
         for r in rows:
             sid = sku_ids.get(r.code)
             if sid is None:
-                skipped_no_sku += 1
-                continue
+                if not r.code:  # без кода черновик не завести
+                    skipped_no_sku += 1
+                    continue
+                # позиции нет в справочнике 1С — заводим черновик (код+имя),
+                # упаковку/камеру дозаполнят вручную в редакторе справочника
+                draft = Sku(code=r.code, name=r.name, is_draft=True)
+                session.add(draft)
+                session.flush()
+                sid = draft.id
+                sku_ids[r.code] = sid
+                new_skus.append(f"{r.code} — {r.name}")
             st = existing.get(sid)
             if st is None:
                 session.add(StockDaily(sku_id=sid, day=day, opening=r.opening,
@@ -189,7 +211,8 @@ def import_stock_daily(
                 updated += 1
         session.commit()
         return {"skipped": False, "day": str(day), "parsed": len(rows),
-                "created": created, "updated": updated, "skipped_no_sku": skipped_no_sku}
+                "created": created, "updated": updated, "skipped_no_sku": skipped_no_sku,
+                "created_sku": len(new_skus), "new_skus": new_skus}
     finally:
         if own:
             session.close()

@@ -72,6 +72,10 @@ class Sku(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     # ручные фиксации полей: имеют приоритет над 1С и НЕ перезаписываются импортом
     overrides: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # черновик: заведён из ведомости остатков, карточки в 1С ещё нет (дозаполнить)
+    is_draft: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

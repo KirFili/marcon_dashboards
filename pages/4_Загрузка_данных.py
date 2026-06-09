@@ -46,6 +46,7 @@ def _process(uploaded_files, importer) -> list[dict]:
         rows.append({
             "Файл": uf.name, "День/итог": r.get("day", "—"),
             "Создано": r.get("created", 0), "Обновлено": r.get("updated", 0),
+            "Новые SKU 🆕": r.get("created_sku", 0),
             "Пропущено (нет SKU)": r.get("skipped_no_sku", 0),
             "Статус": r.get("reason", "ок"),
         })
@@ -65,6 +66,14 @@ def _result_block(state_key: str) -> None:
     st.toast(msg, icon="✅")
     st.success(f"{msg}. Список очищен — можно выбирать новые файлы.")
     st.dataframe(pd.DataFrame(res), use_container_width=True, hide_index=True)
+    new_cnt = sum(r.get("Новые SKU 🆕", 0) for r in res)
+    if new_cnt:
+        st.warning(
+            f"🆕 Заведено новых черновиков SKU: **{new_cnt}**. Их не было в "
+            "справочнике 1С — остатки сохранены, но в занятость камер они попадут "
+            "только после заполнения упаковки в разделе **«Справочник SKU»** "
+            "(фильтр «Только черновики»)."
+        )
 
 
 def _uploader_block(state_key, label, types, importer, button_label, *, multiple, primary=False):
