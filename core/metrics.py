@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from core.db import SessionLocal
 from core.inventory import occupancy_slots
@@ -95,6 +95,42 @@ def chamber_occupancy_daily() -> pd.DataFrame:
     if df.empty:
         return df
     return df.groupby(["day", "chamber"], as_index=False)["slots"].sum()
+
+
+def last_stock_date():
+    """Последняя загруженная дата по дневным остаткам (или None, если пусто)."""
+    with SessionLocal() as session:
+        return session.scalar(select(func.max(StockDaily.day)))
+
+
+def chamber_snapshot(day) -> pd.DataFrame:
+    """Срез занятости на конкретную дату: по каждому SKU паллетоместа на `day`
+    (по среднему остатку дня (нач+кон)/2, как и весь дашборд) плюс мета для
+    фильтров: code, name, chamber, group_kind, group2.
+    """
+    with SessionLocal() as session:
+        chambers = {c.id: c.name for c in session.scalars(select(Chamber))}
+        skus = {s.id: s for s in session.scalars(select(Sku))}
+        daily = session.scalars(
+            select(StockDaily).where(StockDaily.day == day)
+        ).all()
+
+    refs = {sid: _ref(s) for sid, s in skus.items()}
+    rows = []
+    for st in daily:
+        s = skus[st.sku_id]
+        slots = occupancy_slots(refs[st.sku_id], (st.opening + st.closing) / 2.0)
+        rows.append({
+            "code": s.code, "name": s.name,
+            "chamber": chambers.get(s.chamber_id, "—"),
+            "group_kind": s.group_kind or "", "group2": (s.group_kind or "")[:2],
+            "slots": slots,
+        })
+    df = pd.DataFrame(
+        rows, columns=["code", "name", "chamber", "group_kind", "group2", "slots"]
+    )
+    df["slots"] = pd.to_numeric(df["slots"], errors="coerce")
+    return df
 
 
 def load_chambers() -> pd.DataFrame:

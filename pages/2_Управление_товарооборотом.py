@@ -5,7 +5,7 @@ import streamlit as st
 
 from core.auth import require_password
 from core.fmt import money, num
-from core.metrics import load_chambers, load_facts
+from core.metrics import chamber_snapshot, last_stock_date, load_chambers, load_facts
 from core.settings import bootstrap_defaults, get_setting
 from core.theme import BRAND, chamber_color_map
 from core.ui import table_filters
@@ -25,6 +25,16 @@ def _facts():
 @st.cache_data(ttl=600)
 def _chambers():
     return load_chambers()
+
+
+@st.cache_data(ttl=600)
+def _last_date():
+    return last_stock_date()
+
+
+@st.cache_data(ttl=600)
+def _snapshot(day):
+    return chamber_snapshot(day)
 
 
 df = _facts()
@@ -122,27 +132,55 @@ with tab1:
 # ---------- Камеры ----------
 with tab2:
     cham = _chambers()
-    occ_by_ch = (
-        f[f["slots"] > 0].groupby(["chamber", "month"])["slots"].sum()
-        .groupby("chamber").mean().reset_index(name="avg_occupied")
-    )
-    cap = cham.merge(occ_by_ch, on="chamber", how="left").fillna({"avg_occupied": 0})
-    cap["util"] = (100 * cap["avg_occupied"] / cap["capacity"]).round(1)
+    snap_date = _last_date()
+    on_date = False
+    if snap_date is not None:
+        on_date = st.checkbox(
+            f"Состояние складов на дату: {snap_date.strftime('%d.%m.%Y')}",
+            value=False, key="cham_on_date",
+            help="Срез занятости камер на последнюю отчётную дату вместо среднего "
+                 "за период.",
+        )
+
+    if on_date:
+        snap = _snapshot(snap_date)
+        s = snap[snap["group2"].isin(scope)] if only_profile else snap
+        if chambers_sel:
+            s = s[s["chamber"].isin(chambers_sel)]
+        if groups_sel:
+            s = s[s["group_kind"].isin(groups_sel)]
+        occ_by_ch = s.groupby("chamber")["slots"].sum().reset_index(name="occupied")
+        occ_label = "Занято"
+        bar_name = "Занято на дату"
+        chart_title = (
+            f"Загруженность камер на {snap_date.strftime('%d.%m.%Y')} (паллетоместа)"
+        )
+    else:
+        occ_by_ch = (
+            f[f["slots"] > 0].groupby(["chamber", "month"])["slots"].sum()
+            .groupby("chamber").mean().reset_index(name="occupied")
+        )
+        occ_label = "Занято ср/мес"
+        bar_name = "Занято (ср/мес)"
+        chart_title = "Утилизация камер (паллетоместа)"
+
+    cap = cham.merge(occ_by_ch, on="chamber", how="left").fillna({"occupied": 0})
+    cap["util"] = (100 * cap["occupied"] / cap["capacity"]).round(1)
     fig3 = go.Figure()
     fig3.add_bar(x=cap["chamber"], y=cap["capacity"], name="Ёмкость",
                  marker_color=BRAND["light"])
-    fig3.add_bar(x=cap["chamber"], y=cap["avg_occupied"], name="Занято (ср/мес)",
+    fig3.add_bar(x=cap["chamber"], y=cap["occupied"], name=bar_name,
                  marker_color=BRAND["primary"])
-    fig3.update_layout(barmode="group", title="Утилизация камер (паллетоместа)",
+    fig3.update_layout(barmode="group", title=chart_title,
                        height=400, legend_orientation="h", margin=dict(t=50))
     st.plotly_chart(fig3, use_container_width=True)
     st.dataframe(
-        cap[["chamber", "capacity", "avg_occupied", "util"]].rename(columns={
+        cap[["chamber", "capacity", "occupied", "util"]].rename(columns={
             "chamber": "Камера", "capacity": "Ёмкость",
-            "avg_occupied": "Занято ср/мес", "util": "Утилизация, %"}),
+            "occupied": occ_label, "util": "Утилизация, %"}),
         use_container_width=True, hide_index=True,
         column_config={
-            "Занято ср/мес": st.column_config.NumberColumn(format="%.0f"),
+            occ_label: st.column_config.NumberColumn(format="%.0f"),
             "Утилизация, %": st.column_config.NumberColumn(format="%.1f"),
         },
     )
