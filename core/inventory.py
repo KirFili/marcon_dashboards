@@ -349,6 +349,7 @@ class SaleRow:
     period: date  # первое число месяца
     revenue: float
     gross_profit: float
+    name: str = ""
 
 
 def _month_date(s: str) -> date:
@@ -386,11 +387,11 @@ def parse_sales(path: str | Path) -> list[SaleRow]:
         nc = row[0] if row else ""
         if not nc or "," not in nc:  # пусто / группировочная строка
             continue
-        code = nc.rsplit(",", 1)[1].strip()
+        name, code = (s.strip() for s in nc.rsplit(",", 1))  # «<имя>, <Код 1С>»
         for mn in months:
             rev = _to_signed(row[rev_col[mn]]) if rev_col[mn] < len(row) else None
             gp = _to_signed(row[gp_col[mn]]) if (mn in gp_col and gp_col[mn] < len(row)) else None
             if rev is None and gp is None:
                 continue
-            rows.append(SaleRow(code, _month_date(mn), rev or 0.0, gp or 0.0))
+            rows.append(SaleRow(code, _month_date(mn), rev or 0.0, gp or 0.0, name=name))
     return rows

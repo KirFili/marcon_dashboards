@@ -40,6 +40,7 @@ with SessionLocal() as session:
             "units_per_pallet": effective(s, "units_per_pallet"),
             "gap": not has_pallet_basis(ref),
             "locked": bool(s.overrides),
+            "draft": bool(s.is_draft),
             "reset": False,
             "profile": (s.group_kind or "")[:2] in SCOPE,
         }
@@ -48,19 +49,23 @@ with SessionLocal() as session:
 df = pd.DataFrame(records)
 
 # ---------- фильтры ----------
-c1, c2, c3 = st.columns([2, 1, 1])
+c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
 with c1:
     q = st.text_input("Поиск (код или наименование)", "")
 with c2:
     only_profile = st.checkbox("Только профильные", value=True)
 with c3:
     only_gaps = st.checkbox("Только с пробелами", value=False)
+with c4:
+    only_drafts = st.checkbox("Только черновики 🆕", value=False)
 
 view = df
 if only_profile:
     view = view[view["profile"]]
 if only_gaps:
     view = view[view["gap"]]
+if only_drafts:
+    view = view[view["draft"]]
 if q.strip():
     s = q.strip().lower()
     view = view[
@@ -68,10 +73,11 @@ if q.strip():
         | view["name"].str.lower().str.contains(s, na=False)
     ]
 
-m1, m2, m3 = st.columns(3)
+m1, m2, m3, m4 = st.columns(4)
 m1.metric("Показано SKU", len(view))
 m2.metric("С пробелами (в выборке)", int(view["gap"].sum()))
 m3.metric("Зафиксировано вручную 🔒", int(df["locked"].sum()))
+m4.metric("Черновики 🆕", int(df["draft"].sum()))
 
 view = view.reset_index(drop=True)
 
@@ -81,12 +87,15 @@ edited = st.data_editor(
     use_container_width=True,
     height=560,
     column_order=[
-        "code", "name", "group_kind", "chamber", "unit", "gap", "locked",
+        "code", "name", "group_kind", "chamber", "unit", "draft", "gap", "locked",
         "units_per_box", "boxes_per_pallet", "boxes_per_layer",
         "layers_per_pallet", "units_per_pallet", "reset",
     ],
     column_config={
         "id": None, "profile": None,
+        "draft": st.column_config.CheckboxColumn(
+            "🆕", disabled=True,
+            help="Черновик: заведён из ведомости остатков, карточки 1С ещё нет"),
         "code": st.column_config.TextColumn("Код 1С", disabled=True, pinned=True),
         "name": st.column_config.TextColumn("Наименование", disabled=True, width="medium", pinned=True),
         "group_kind": st.column_config.TextColumn("Групировка", disabled=True, pinned=True),
