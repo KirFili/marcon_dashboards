@@ -31,7 +31,7 @@ def login_layout():
                     html.Div(
                         [
                             dbc.Input(id="login-pwd", type="password",
-                                      placeholder="Введите пароль",
+                                      placeholder="Введите пароль", n_submit=0,
                                       style={"maxWidth": "220px"}),
                             dbc.Button("Войти", id="login-btn", color="primary",
                                        n_clicks=0, className="ms-2"),

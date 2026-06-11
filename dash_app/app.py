@@ -55,14 +55,14 @@ def _render(pathname, _trigger):
 
 
 @callback(Output("login-trigger", "data"), Output("login-err", "children"),
-          Input("login-btn", "n_clicks"), State("login-pwd", "value"),
-          prevent_initial_call=True)
-def _login(n, pwd):
-    if not n:  # холостое срабатывание при появлении формы (n_clicks=0)
+          Input("login-btn", "n_clicks"), Input("login-pwd", "n_submit"),
+          State("login-pwd", "value"), prevent_initial_call=True)
+def _login(n_clicks, n_submit, pwd):
+    if not n_clicks and not n_submit:  # холостое срабатывание при появлении формы
         return no_update, no_update
     if pwd == auth.PASSWORD:
         session["authed"] = True
-        return n, ""
+        return (n_clicks or 0) + (n_submit or 0), ""
     return no_update, dbc.Alert("Неверный пароль", color="danger", className="mt-2")
 
 
