@@ -9,12 +9,12 @@ from __future__ import annotations
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
-from dash_app.views import inventory, turnover
+from dash_app.views import inventory, skus, turnover
 
 NAV = [
     {"path": "/", "label": "Товарооборот", "icon": "📦", "ready": True},
     {"path": "/inventory", "label": "Управление запасами", "icon": "🧮", "ready": True},
-    {"path": "/skus", "label": "Справочник SKU", "icon": "📇"},
+    {"path": "/skus", "label": "Справочник SKU", "icon": "📇", "ready": True},
     {"path": "/upload", "label": "Загрузка данных", "icon": "📥"},
     {"path": "/settings", "label": "Настройки", "icon": "⚙️"},
 ]
@@ -38,6 +38,8 @@ def _page(pathname):
         return turnover.layout()
     if pathname == "/inventory":
         return inventory.layout()
+    if pathname == "/skus":
+        return skus.layout()
     return dbc.Alert("Раздел переносится на Dash в следующих вехах миграции.",
                      color="info")
 
