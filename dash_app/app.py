@@ -19,7 +19,13 @@ from flask import session
 from core.settings import bootstrap_defaults
 from dash_app import auth
 from dash_app.components import shell
-from dash_app.views import inventory, skus, turnover  # noqa: F401  — регистрирует callbacks
+from dash_app.views import (  # noqa: F401 — регистрирует callbacks
+    inventory,
+    settings_page,
+    skus,
+    turnover,
+    upload,
+)
 
 load_dotenv()
 
@@ -63,6 +69,12 @@ def _login(n, pwd):
 def _logout(n):
     session.pop("authed", None)
     return n
+
+
+@callback(Output("drafts-modal", "is_open"), Input("drafts-modal-close", "n_clicks"),
+          prevent_initial_call=True)
+def _close_drafts(n):
+    return False
 
 
 if __name__ == "__main__":

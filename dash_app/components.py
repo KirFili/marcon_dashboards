@@ -8,16 +8,41 @@ from __future__ import annotations
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
+from flask import session
+from sqlalchemy import func, select
 
-from dash_app.views import inventory, skus, turnover
+from core.db import SessionLocal
+from core.models import Sku
+from dash_app.views import inventory, settings_page, skus, turnover, upload
 
 NAV = [
     {"path": "/", "label": "Товарооборот", "icon": "📦", "ready": True},
     {"path": "/inventory", "label": "Управление запасами", "icon": "🧮", "ready": True},
     {"path": "/skus", "label": "Справочник SKU", "icon": "📇", "ready": True},
-    {"path": "/upload", "label": "Загрузка данных", "icon": "📥"},
-    {"path": "/settings", "label": "Настройки", "icon": "⚙️"},
+    {"path": "/upload", "label": "Загрузка данных", "icon": "📥", "ready": True},
+    {"path": "/settings", "label": "Настройки", "icon": "⚙️", "ready": True},
 ]
+
+
+def _draft_count() -> int:
+    with SessionLocal() as s:
+        return s.scalar(select(func.count()).select_from(Sku).where(Sku.is_draft)) or 0
+
+
+def _drafts_modal():
+    """Один раз за сессию (после входа) показывает окно, если есть черновики SKU."""
+    if session.get("drafts_warned"):
+        return None
+    session["drafts_warned"] = True
+    n = _draft_count()
+    if not n:
+        return None
+    return dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("⚠️ Требуется обновление справочника")),
+        dbc.ModalBody(dbc.Alert(f"{n} новых позиций. Обновите справочник SKU из 1С.",
+                                color="warning", className="mb-0")),
+        dbc.ModalFooter(dbc.Button("Понятно", id="drafts-modal-close", color="primary")),
+    ], id="drafts-modal", is_open=True)
 
 
 def _sidebar(pathname):
@@ -40,8 +65,11 @@ def _page(pathname):
         return inventory.layout()
     if pathname == "/skus":
         return skus.layout()
-    return dbc.Alert("Раздел переносится на Dash в следующих вехах миграции.",
-                     color="info")
+    if pathname == "/upload":
+        return upload.layout()
+    if pathname == "/settings":
+        return settings_page.layout()
+    return dbc.Alert("Раздел не найден.", color="info")
 
 
 def shell(pathname):
@@ -58,4 +86,4 @@ def shell(pathname):
         dbc.Col(_page(pathname), md=10),
     ]), fluid=True)
 
-    return html.Div([header, body])
+    return html.Div([header, body, _drafts_modal() or html.Div()])
