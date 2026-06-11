@@ -56,7 +56,9 @@ def _records() -> list[dict]:
 def _filter(recs, search, only_profile, only_gaps, only_drafts):
     out = recs
     if only_profile:
-        out = [r for r in out if r["profile"]]
+        # черновики показываем всегда: они без группы (не профильные), но требуют
+        # заполнения — иначе предупреждение «N новых» висит, а в списке их не найти
+        out = [r for r in out if r["profile"] or r["draft"]]
     if only_gaps:
         out = [r for r in out if r["gap"]]
     if only_drafts:
