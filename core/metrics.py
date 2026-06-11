@@ -105,7 +105,7 @@ def last_stock_date():
 
 def chamber_snapshot(day) -> pd.DataFrame:
     """Срез занятости на конкретную дату: по каждому SKU паллетоместа на `day`
-    (по среднему остатку дня (нач+кон)/2, как и весь дашборд) плюс мета для
+    по КОНЕЧНОМУ остатку дня (состояние склада на отчётную дату) плюс мета для
     фильтров: code, name, chamber, group_kind, group2.
     """
     with SessionLocal() as session:
@@ -119,7 +119,7 @@ def chamber_snapshot(day) -> pd.DataFrame:
     rows = []
     for st in daily:
         s = skus[st.sku_id]
-        slots = occupancy_slots(refs[st.sku_id], (st.opening + st.closing) / 2.0)
+        slots = occupancy_slots(refs[st.sku_id], st.closing)
         rows.append({
             "code": s.code, "name": s.name,
             "chamber": chambers.get(s.chamber_id, "—"),
