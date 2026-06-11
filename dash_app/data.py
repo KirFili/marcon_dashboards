@@ -12,8 +12,15 @@ import time
 
 import pandas as pd
 
-from core.metrics import chamber_snapshot, last_stock_date, load_chambers, load_facts
+from core.metrics import (
+    chamber_occupancy_daily,
+    chamber_snapshot,
+    last_stock_date,
+    load_chambers,
+    load_facts,
+)
 from core.settings import get_setting
+from core.task2 import daily_period_days, load_assortment
 
 MONTHS_RU = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн",
              "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
@@ -57,6 +64,18 @@ def last_date():
 
 def snapshot(day):
     return _cached(f"snap:{day}", lambda: chamber_snapshot(day))
+
+
+def assortment() -> pd.DataFrame:
+    return _cached("assortment", load_assortment)
+
+
+def occ_daily() -> pd.DataFrame:
+    return _cached("occ_daily", chamber_occupancy_daily)
+
+
+def days() -> int:
+    return _cached("days", daily_period_days)
 
 
 def scope() -> set[str]:

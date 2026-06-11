@@ -19,7 +19,7 @@ from flask import session
 from core.settings import bootstrap_defaults
 from dash_app import auth
 from dash_app.components import shell
-from dash_app.views import turnover  # noqa: F401  — регистрирует callbacks
+from dash_app.views import inventory, turnover  # noqa: F401  — регистрирует callbacks
 
 load_dotenv()
 
