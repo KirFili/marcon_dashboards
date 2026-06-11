@@ -58,6 +58,8 @@ def _render(pathname, _trigger):
           Input("login-btn", "n_clicks"), State("login-pwd", "value"),
           prevent_initial_call=True)
 def _login(n, pwd):
+    if not n:  # холостое срабатывание при появлении формы (n_clicks=0)
+        return no_update, no_update
     if pwd == auth.PASSWORD:
         session["authed"] = True
         return n, ""
