@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import dash_bootstrap_components as dbc
 from dash import dcc, html
-from flask import session
 from sqlalchemy import func, select
 
 from core.db import SessionLocal
@@ -24,25 +23,9 @@ NAV = [
 ]
 
 
-def _draft_count() -> int:
+def draft_count() -> int:
     with SessionLocal() as s:
         return s.scalar(select(func.count()).select_from(Sku).where(Sku.is_draft)) or 0
-
-
-def _drafts_modal():
-    """Один раз за сессию (после входа) показывает окно, если есть черновики SKU."""
-    if session.get("drafts_warned"):
-        return None
-    session["drafts_warned"] = True
-    n = _draft_count()
-    if not n:
-        return None
-    return dbc.Modal([
-        dbc.ModalHeader(dbc.ModalTitle("⚠️ Требуется обновление справочника")),
-        dbc.ModalBody(dbc.Alert(f"{n} новых позиций. Обновите справочник SKU из 1С.",
-                                color="warning", className="mb-0")),
-        dbc.ModalFooter(dbc.Button("Понятно", id="drafts-modal-close", color="primary")),
-    ], id="drafts-modal", is_open=True)
 
 
 def _sidebar(pathname):
@@ -58,7 +41,7 @@ def _sidebar(pathname):
     return dbc.Nav(links, vertical=True, pills=True)
 
 
-def _page(pathname):
+def page_for(pathname):
     if pathname in ("/", None, ""):
         return turnover.layout()
     if pathname == "/inventory":
@@ -73,6 +56,10 @@ def _page(pathname):
 
 
 def shell(pathname):
+    """Каркас после входа: шапка + навигация + контент (наполнен сразу под текущий
+    путь). Переходы обновляют только sidebar/page-content (callback по url.pathname);
+    гейт авторизации при переходах НЕ пере-рендерится → разлогинить навигацией нельзя.
+    """
     header = dbc.Navbar(dbc.Container([
         dbc.Row([
             dbc.Col(html.Img(src="/assets/stardogs_logo.png", height="36px")),
@@ -82,8 +69,8 @@ def shell(pathname):
     ], fluid=True), color="primary", dark=True, className="mb-3")
 
     body = dbc.Container(dbc.Row([
-        dbc.Col(_sidebar(pathname), md=2),
-        dbc.Col(_page(pathname), md=10),
+        dbc.Col(html.Div(_sidebar(pathname), id="sidebar"), md=2),
+        dbc.Col(html.Div(page_for(pathname), id="page-content"), md=10),
     ]), fluid=True)
 
-    return html.Div([header, body, _drafts_modal() or html.Div()])
+    return html.Div([header, body])

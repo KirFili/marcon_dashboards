@@ -9,15 +9,10 @@ from __future__ import annotations
 import os
 
 import dash_bootstrap_components as dbc
-from dash import dcc, html
-from flask import session
+from dash import html
 
 PASSWORD = os.getenv("DASHBOARD_PASSWORD", "marcon")
 LOGO_URL = "/assets/stardogs_logo.png"
-
-
-def is_authed() -> bool:
-    return bool(session.get("authed"))
 
 
 def login_layout():
