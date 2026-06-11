@@ -51,8 +51,9 @@ def _repl_params():
     return lead, svc, dead, z_from_service_level(svc)
 
 
-def _grid(_id, height=420):
+def _grid(_id, height=420, rowData=None, columnDefs=None):
     return dag.AgGrid(id=_id, columnSize="sizeToFit",
+                      rowData=rowData or [], columnDefs=columnDefs or [],
                       defaultColDef={"sortable": True, "filter": True,
                                      "resizable": True},
                       dashGridOptions={"pagination": True, "paginationPageSize": 15},
@@ -67,6 +68,18 @@ def layout():
                          "остатки.", color="info")
     chambers_opts = sorted(df["chamber"].dropna().unique())
 
+    # начальные значения — сразу server-side, чтобы данные были на любой загрузке
+    d = (True, [], 0)
+    k_sold, k_a, k_b, k_c, k_turn = _kpis(*d)
+    abc_m, abc_sh, abc_cap, abc_rows, abc_cols = _abc(*d)
+    scat, slow_med, slow_rows, slow_cols, fast_med, fast_rows, fast_cols = \
+        _turnover(*d, 15, 15)
+    rp_cap, rp_crit, rp_order, rp_ok, rp_dead, rp_empty, rp_rows, rp_cols = \
+        _replenishment(*d, True)
+    se_cap, se_fig, se_need, se_new, se_days, se_empty, se_rows, se_cols = \
+        _seasonal(*d, True)
+    ov_cap, ov_fig, ov_tbl, ov_warn = _overflow(60, 0)
+
     controls = dbc.Card(dbc.CardBody(dbc.Row([
         dbc.Col(dbc.Switch(id="iv-only-profile", label="Только профильные",
                            value=True), md=3),
@@ -77,76 +90,78 @@ def layout():
                            outline=True, size="sm", className="mt-4"), md="auto"),
     ], className="g-2")), className="mb-3")
 
-    def kpi(title, _id):
+    def kpi(title, _id, value):
         return dbc.Col(dbc.Card(dbc.CardBody([
             html.Div(title, className="text-muted small"),
-            html.H4(id=_id, className="mb-0")])), md=True)
+            html.H4(value, id=_id, className="mb-0")])), md=True)
 
     kpis = dbc.Row([
-        kpi("Продаваемых SKU", "iv-kpi-sold"), kpi("Класс A", "iv-kpi-a"),
-        kpi("Класс B", "iv-kpi-b"), kpi("Класс C", "iv-kpi-c"),
-        kpi("Медиана оборачиваемости, дн", "iv-kpi-turn"),
+        kpi("Продаваемых SKU", "iv-kpi-sold", k_sold), kpi("Класс A", "iv-kpi-a", k_a),
+        kpi("Класс B", "iv-kpi-b", k_b), kpi("Класс C", "iv-kpi-c", k_c),
+        kpi("Медиана оборачиваемости, дн", "iv-kpi-turn", k_turn),
     ], className="mb-3 g-2")
 
     tabs = dbc.Tabs([
         # --- ABC / XYZ ---
         dbc.Tab(html.Div([
-            dbc.Row([dbc.Col(dcc.Graph(id="iv-abc-matrix"), md=6),
-                     dbc.Col(dcc.Graph(id="iv-abc-share"), md=6)]),
-            html.P(id="iv-abc-caption", className="text-muted small"),
-            _grid("iv-abc-grid"),
+            dbc.Row([dbc.Col(dcc.Graph(id="iv-abc-matrix", figure=abc_m), md=6),
+                     dbc.Col(dcc.Graph(id="iv-abc-share", figure=abc_sh), md=6)]),
+            html.P(abc_cap, id="iv-abc-caption", className="text-muted small"),
+            _grid("iv-abc-grid", rowData=abc_rows, columnDefs=abc_cols),
         ], className="pt-3"), label="ABC / XYZ"),
         # --- Оборачиваемость ---
         dbc.Tab(html.Div([
-            dcc.Graph(id="iv-turn-scatter"),
+            dcc.Graph(id="iv-turn-scatter", figure=scat),
             dbc.Row([
                 dbc.Col([html.B("Залежавшиеся (долгий оборот)"),
                          dbc.Label("Сколько показать", className="mt-2"),
                          dbc.Input(id="iv-slow-n", type="number", value=15, min=1,
                                    step=1, size="sm", style={"width": "120px"}),
-                         html.Div(id="iv-slow-median", className="text-muted my-1"),
-                         _grid("iv-slow-grid", height=320)], md=6),
+                         html.Div(slow_med, id="iv-slow-median", className="text-muted my-1"),
+                         _grid("iv-slow-grid", height=320, rowData=slow_rows,
+                               columnDefs=slow_cols)], md=6),
                 dbc.Col([html.B("Быстрые (короткий оборот)"),
                          dbc.Label("Сколько показать", className="mt-2"),
                          dbc.Input(id="iv-fast-n", type="number", value=15, min=1,
                                    step=1, size="sm", style={"width": "120px"}),
-                         html.Div(id="iv-fast-median", className="text-muted my-1"),
-                         _grid("iv-fast-grid", height=320)], md=6),
+                         html.Div(fast_med, id="iv-fast-median", className="text-muted my-1"),
+                         _grid("iv-fast-grid", height=320, rowData=fast_rows,
+                               columnDefs=fast_cols)], md=6),
             ]),
         ], className="pt-3"), label="Оборачиваемость"),
         # --- Пополнение ---
         dbc.Tab(html.Div([
-            html.P(id="iv-repl-caption", className="text-muted small pt-2"),
-            dbc.Row([kpi("🔴 Критично", "iv-repl-crit"),
-                     kpi("🟠 Пора заказывать", "iv-repl-order"),
-                     kpi("🟢 В норме", "iv-repl-ok"),
-                     kpi("⚪ Неактивных", "iv-repl-dead")], className="mb-3 g-2"),
+            html.P(rp_cap, id="iv-repl-caption", className="text-muted small pt-2"),
+            dbc.Row([kpi("🔴 Критично", "iv-repl-crit", rp_crit),
+                     kpi("🟠 Пора заказывать", "iv-repl-order", rp_order),
+                     kpi("🟢 В норме", "iv-repl-ok", rp_ok),
+                     kpi("⚪ Неактивных", "iv-repl-dead", rp_dead)], className="mb-3 g-2"),
             dbc.Switch(id="iv-repl-action", value=True,
                        label="Только требующие заказа (критично + пора заказывать)"),
-            html.Div(id="iv-repl-empty"),
-            _grid("iv-repl-grid", height=460),
+            html.Div(rp_empty, id="iv-repl-empty"),
+            _grid("iv-repl-grid", height=460, rowData=rp_rows, columnDefs=rp_cols),
         ], className="pt-3"), label="Пополнение"),
         # --- Сезонный риск ---
         dbc.Tab(html.Div([
-            html.P(id="iv-seas-caption", className="text-muted small pt-2"),
-            dcc.Graph(id="iv-seas-profile"),
-            dbc.Row([kpi("Нужен запас под пик", "iv-seas-need"),
-                     kpi("Из них «сейчас в норме»", "iv-seas-new"),
-                     kpi("Дней до пика", "iv-seas-days")], className="mb-3 g-2"),
+            html.P(se_cap, id="iv-seas-caption", className="text-muted small pt-2"),
+            dcc.Graph(id="iv-seas-profile", figure=se_fig),
+            dbc.Row([kpi("Нужен запас под пик", "iv-seas-need", se_need),
+                     kpi("Из них «сейчас в норме»", "iv-seas-new", se_new),
+                     kpi("Дней до пика", "iv-seas-days", se_days)], className="mb-3 g-2"),
             dbc.Switch(id="iv-seas-only-new", value=True,
                        label="Только «сейчас в норме, но к пику не хватит»"),
-            html.Div(id="iv-seas-empty"),
-            _grid("iv-seas-grid", height=440),
+            html.Div(se_empty, id="iv-seas-empty"),
+            _grid("iv-seas-grid", height=440, rowData=se_rows, columnDefs=se_cols),
         ], className="pt-3"), label="Сезонный риск"),
         # --- Переполнение камер ---
         dbc.Tab(html.Div([
             dbc.Label("Окно тренда (последние дни)", className="pt-2"),
             dcc.Slider(id="iv-overflow-window", min=30, max=120, step=None,
                        marks={30: "30", 60: "60", 90: "90", 120: "120"}, value=60),
-            html.P(id="iv-overflow-caption", className="text-muted small"),
-            dcc.Graph(id="iv-overflow-graph"),
-            html.Div(id="iv-overflow-table"),
-            html.Div(id="iv-overflow-warn"),
+            html.P(ov_cap, id="iv-overflow-caption", className="text-muted small"),
+            dcc.Graph(id="iv-overflow-graph", figure=ov_fig),
+            html.Div(ov_tbl, id="iv-overflow-table"),
+            html.Div(ov_warn, id="iv-overflow-warn"),
         ], className="pt-3"), label="Переполнение камер"),
     ])
 

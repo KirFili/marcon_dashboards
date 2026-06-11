@@ -65,6 +65,16 @@ def layout():
         else "Состояние складов на дату"
     )
 
+    # начальные значения считаем сразу (server-side) — чтобы данные были на любой
+    # загрузке, не дожидаясь срабатывания callbacks на смонтированных компонентах
+    d = (True, [0, len(months) - 1], [], [], 0)
+    k_rev, k_gp, k_margin, k_slots, k_gpslot = _kpis(*d)
+    dyn_rev, dyn_gp = _dynamics(*d)
+    ch_fig, ch_tbl = _chambers(*d, False)
+    rk_top, rk_bot, rk_rows, rk_cols = _ranking(*d)
+    eff_fig = _efficiency(*d, True)
+    seas_fig, seas_tbl = _seasonality(*d, "Валовая прибыль")
+
     controls = dbc.Card(dbc.CardBody(dbc.Row([
         dbc.Col([dbc.Switch(id="tv-only-profile", label="Только профильные группы",
                             value=True)], md=3),
@@ -83,35 +93,37 @@ def layout():
                             className="mt-4")], md="auto"),
     ], className="g-2")), className="mb-3")
 
-    def kpi(title, _id):
+    def kpi(title, _id, value):
         return dbc.Col(dbc.Card(dbc.CardBody([
             html.Div(title, className="text-muted small"),
-            html.H4(id=_id, className="mb-0"),
+            html.H4(value, id=_id, className="mb-0"),
         ])), md=True)
 
     kpis = dbc.Row([
-        kpi("Выручка", "tv-kpi-rev"),
-        kpi("Валовая прибыль", "tv-kpi-gp"),
-        kpi("Маржа", "tv-kpi-margin"),
-        kpi("Ср. занято/мес", "tv-kpi-slots"),
-        kpi("ВП на паллетоместо", "tv-kpi-gpslot"),
+        kpi("Выручка", "tv-kpi-rev", k_rev),
+        kpi("Валовая прибыль", "tv-kpi-gp", k_gp),
+        kpi("Маржа", "tv-kpi-margin", k_margin),
+        kpi("Ср. занято/мес", "tv-kpi-slots", k_slots),
+        kpi("ВП на паллетоместо", "tv-kpi-gpslot", k_gpslot),
     ], className="mb-3 g-2")
 
     tabs = dbc.Tabs([
-        dbc.Tab(html.Div([dcc.Graph(id="tv-dyn-rev"), dcc.Graph(id="tv-dyn-gpslot")],
+        dbc.Tab(html.Div([dcc.Graph(id="tv-dyn-rev", figure=dyn_rev),
+                          dcc.Graph(id="tv-dyn-gpslot", figure=dyn_gp)],
                          className="pt-3"), label="Динамика"),
         dbc.Tab(html.Div([
             dbc.Switch(id="tv-on-date", label=on_date_label, value=False,
                        className="pt-3"),
-            dcc.Graph(id="tv-chamber-graph"),
-            html.Div(id="tv-chamber-table"),
+            dcc.Graph(id="tv-chamber-graph", figure=ch_fig),
+            html.Div(ch_tbl, id="tv-chamber-table"),
         ]), label="Камеры"),
         dbc.Tab(html.Div([
-            dbc.Row([dbc.Col(dcc.Graph(id="tv-rank-top"), md=6),
-                     dbc.Col(dcc.Graph(id="tv-rank-bot"), md=6)]),
+            dbc.Row([dbc.Col(dcc.Graph(id="tv-rank-top", figure=rk_top), md=6),
+                     dbc.Col(dcc.Graph(id="tv-rank-bot", figure=rk_bot), md=6)]),
             html.P("ВП на паллетоместо = валовая прибыль за период ÷ паллето-месяцы "
                    "занятости.", className="text-muted small"),
             dag.AgGrid(id="tv-rank-grid", columnSize="sizeToFit",
+                       rowData=rk_rows, columnDefs=rk_cols,
                        defaultColDef={"sortable": True, "filter": True,
                                       "resizable": True},
                        dashGridOptions={"pagination": True,
@@ -121,14 +133,14 @@ def layout():
         dbc.Tab(html.Div([
             dbc.Checkbox(id="tv-log-x", label="Логарифм по оси X", value=True,
                          className="pt-3"),
-            dcc.Graph(id="tv-eff-scatter"),
+            dcc.Graph(id="tv-eff-scatter", figure=eff_fig),
         ]), label="Эффективность"),
         dbc.Tab(html.Div([
             dbc.RadioItems(id="tv-seas-metric",
                            options=["Валовая прибыль", "Выручка"],
                            value="Валовая прибыль", inline=True, className="pt-3"),
-            dcc.Graph(id="tv-seas-line"),
-            html.Div(id="tv-seas-table"),
+            dcc.Graph(id="tv-seas-line", figure=seas_fig),
+            html.Div(seas_tbl, id="tv-seas-table"),
         ]), label="Сезонность"),
     ])
 

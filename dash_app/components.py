@@ -14,6 +14,8 @@ from core.db import SessionLocal
 from core.models import Sku
 from dash_app.views import inventory, settings_page, skus, turnover, upload
 
+SIDEBAR_STYLE = {"width": "240px", "flexShrink": 0}
+
 NAV = [
     {"path": "/", "label": "Товарооборот", "icon": "📦", "ready": True},
     {"path": "/inventory", "label": "Управление запасами", "icon": "🧮", "ready": True},
@@ -61,16 +63,20 @@ def shell(pathname):
     гейт авторизации при переходах НЕ пере-рендерится → разлогинить навигацией нельзя.
     """
     header = dbc.Navbar(dbc.Container([
-        dbc.Row([
-            dbc.Col(html.Img(src="/assets/stardogs_logo.png", height="36px")),
-            dbc.Col(dbc.NavbarBrand("Маркон · Аналитика", className="ms-2")),
-        ], align="center", className="g-2"),
+        html.Div([
+            dbc.Button("☰", id="menu-toggle", color="light", outline=True,
+                       size="sm", className="me-3"),
+            html.Img(src="/assets/stardogs_logo.png", height="36px"),
+            dbc.NavbarBrand("Маркон · Аналитика", className="ms-2"),
+        ], className="d-flex align-items-center"),
         dbc.Button("Выйти", id="logout-btn", color="light", size="sm", n_clicks=0),
-    ], fluid=True), color="primary", dark=True, className="mb-3")
+    ], fluid=True, className="d-flex justify-content-between align-items-center"),
+        color="primary", dark=True, className="mb-3")
 
-    body = dbc.Container(dbc.Row([
-        dbc.Col(html.Div(_sidebar(pathname), id="sidebar"), md=2),
-        dbc.Col(html.Div(page_for(pathname), id="page-content"), md=10),
-    ]), fluid=True)
+    body = html.Div([
+        html.Div(_sidebar(pathname), id="sidebar", style=SIDEBAR_STYLE),
+        html.Div(page_for(pathname), id="page-content",
+                 style={"flex": "1", "minWidth": 0}),
+    ], style={"display": "flex", "gap": "1rem", "padding": "0 1rem"})
 
     return html.Div([header, body])

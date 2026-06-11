@@ -17,7 +17,13 @@ from dotenv import load_dotenv
 
 from core.settings import bootstrap_defaults
 from dash_app import auth
-from dash_app.components import _sidebar, draft_count, page_for, shell
+from dash_app.components import (
+    SIDEBAR_STYLE,
+    _sidebar,
+    draft_count,
+    page_for,
+    shell,
+)
 from dash_app.views import (  # noqa: F401 — регистрирует callbacks
     inventory,
     settings_page,
@@ -66,6 +72,16 @@ def _render_auth(authed, pathname):
           Input("url", "pathname"), prevent_initial_call=True)
 def _nav(pathname):
     return _sidebar(pathname), page_for(pathname)
+
+
+# Скрыть/показать боковое меню по кнопке-гамбургеру (☰).
+@callback(Output("sidebar", "style"), Input("menu-toggle", "n_clicks"),
+          prevent_initial_call=True)
+def _toggle_menu(n):
+    style = dict(SIDEBAR_STYLE)
+    if (n or 0) % 2 == 1:
+        style["display"] = "none"
+    return style
 
 
 @callback(Output("auth-store", "data"), Output("login-err", "children"),
