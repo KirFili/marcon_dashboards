@@ -163,7 +163,7 @@ def layout():
             html.Div(ov_tbl, id="iv-overflow-table"),
             html.Div(ov_warn, id="iv-overflow-warn"),
         ], className="pt-3"), label="Переполнение камер"),
-    ])
+    ], active_tab="tab-0")  # явно активируем первую вкладку (иначе её панель скрыта)
 
     return html.Div([
         dcc.Store(id="iv-refresh", data=0),

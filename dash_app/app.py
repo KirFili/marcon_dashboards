@@ -55,16 +55,28 @@ app.layout = html.Div([
     dcc.Store(id="drafts-warned-store", data=False),
     html.Div(id="drafts-modal-container"),  # модалку целиком кладёт callback
     html.Div(id="root"),
+    html.Div(id="resize-dummy", style={"display": "none"}),
 ])
 
 
+# Plotly рисует графики по размеру контейнера в момент монтирования; в свежей
+# вкладке/странице это может дать нулевой размер (пусто, пока не дёрнешь resize —
+# что и делает ручное переключение вкладок). Триггерим resize при смене контента.
+app.clientside_callback(
+    "function(_) { setTimeout(function(){ "
+    "window.dispatchEvent(new Event('resize')); }, 150); "
+    "return window.dash_clientside.no_update; }",
+    Output("resize-dummy", "children"),
+    Input("page-content", "children"),
+)
+
+
 # Гейт авторизации — реагирует ТОЛЬКО на смену auth-store (вход/выход).
-# Контент сразу наполняется под текущий путь (State), без гонки монтирования.
-# Переходы между страницами этот callback НЕ трогают → навигацией не разлогинить.
-@callback(Output("root", "children"), Input("auth-store", "data"),
-          State("url", "pathname"))
-def _render_auth(authed, pathname):
-    return shell(pathname) if authed else auth.login_layout()
+# После входа всегда открывается Товарооборот; дальше навигация меняет контент.
+# Переходы этот callback НЕ трогают → навигацией не разлогинить.
+@callback(Output("root", "children"), Input("auth-store", "data"))
+def _render_auth(authed):
+    return shell() if authed else auth.login_layout()
 
 
 # Переход — обновляет меню и контент по url (только при реальной смене пути).

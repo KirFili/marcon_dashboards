@@ -18,7 +18,7 @@ SIDEBAR_STYLE = {"width": "240px", "flexShrink": 0}
 
 NAV = [
     {"path": "/", "label": "Товарооборот", "icon": "📦", "ready": True},
-    {"path": "/inventory", "label": "Управление запасами", "icon": "🧮", "ready": True},
+    {"path": "/inventory", "label": "Запасы", "icon": "🧮", "ready": True},
     {"path": "/skus", "label": "Справочник SKU", "icon": "📇", "ready": True},
     {"path": "/upload", "label": "Загрузка данных", "icon": "📥", "ready": True},
     {"path": "/settings", "label": "Настройки", "icon": "⚙️", "ready": True},
@@ -57,10 +57,11 @@ def page_for(pathname):
     return dbc.Alert("Раздел не найден.", color="info")
 
 
-def shell(pathname):
-    """Каркас после входа: шапка + навигация + контент (наполнен сразу под текущий
-    путь). Переходы обновляют только sidebar/page-content (callback по url.pathname);
-    гейт авторизации при переходах НЕ пере-рендерится → разлогинить навигацией нельзя.
+def shell(pathname="/"):
+    """Каркас после входа: шапка + навигация + контент. По умолчанию открывается
+    Товарооборот ("/"); переходы обновляют только sidebar/page-content (callback по
+    url.pathname). Гейт авторизации при переходах НЕ пере-рендерится → навигацией
+    не разлогинить.
     """
     header = dbc.Navbar(dbc.Container([
         html.Div([

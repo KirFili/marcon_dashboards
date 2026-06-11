@@ -142,7 +142,7 @@ def layout():
             dcc.Graph(id="tv-seas-line", figure=seas_fig),
             html.Div(seas_tbl, id="tv-seas-table"),
         ]), label="Сезонность"),
-    ])
+    ], active_tab="tab-0")  # явно активируем первую вкладку (иначе её панель скрыта)
 
     return html.Div([
         dcc.Store(id="tv-refresh", data=0),
