@@ -50,25 +50,37 @@ def _read_grid(path: str | Path) -> list[list[str]]:
     return grid
 
 
-def _to_float(s: str) -> float | None:
-    """Положительное число или None (для количеств/упаковки)."""
+def _parse_num(s: str) -> float | None:
+    """Число из 1С в любой локали выгрузки:
+    '72730', '113,770.000' (en-US: запятая=тысячи, точка=дробная),
+    '1 234,56' (ru: пробел=тысячи, запятая=дробная).
+    Дробный разделитель — последний из «,» или «.»; второй символ и пробелы
+    (вкл. неразрывный) считаем разделителями тысяч."""
     if not s:
         return None
+    t = s.replace(" ", "").replace("\xa0", "")
+    if "," in t and "." in t:
+        if t.rfind(",") > t.rfind("."):
+            t = t.replace(".", "").replace(",", ".")
+        else:
+            t = t.replace(",", "")
+    elif "," in t:
+        t = t.replace(",", ".")
     try:
-        x = float(s.replace(",", ".").replace(" ", ""))
-        return x if x > 0 else None
+        return float(t)
     except ValueError:
         return None
+
+
+def _to_float(s: str) -> float | None:
+    """Положительное число или None (для количеств/упаковки)."""
+    x = _parse_num(s)
+    return x if x is not None and x > 0 else None
 
 
 def _to_signed(s: str) -> float | None:
     """Любое число (деньги: прибыль/возвраты могут быть отрицательными)."""
-    if not s:
-        return None
-    try:
-        return float(s.replace(",", ".").replace(" ", ""))
-    except ValueError:
-        return None
+    return _parse_num(s)
 
 
 # ----------------------------------------------------------------------------
@@ -165,7 +177,7 @@ def stock_period(path: str | Path) -> date | None:
     for row in grid[:10]:
         for cell in row:
             if cell.startswith("Период"):
-                m = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", cell)
+                m = re.search(r"(\d{2})[./-](\d{2})[./-](\d{4})", cell)
                 if m:
                     return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
     return None
