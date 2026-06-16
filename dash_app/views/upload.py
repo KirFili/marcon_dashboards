@@ -16,11 +16,12 @@ from pathlib import Path
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import Input, Output, State, callback, dcc, html
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from core.db import SessionLocal
+from core.fmt import money
 from core.ingest import import_sales, import_skus, import_stock_daily
-from core.models import Sku, StockDaily, Upload
+from core.models import Sale, Sku, StockDaily, Upload
 from dash_app import data
 
 MONTHS_RU = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн",
@@ -101,8 +102,10 @@ def layout():
                "из «Период» внутри файла.", className="text-muted small"),
         _uploader("up-daily", "Перетащи или выбери дневные ведомости (.xlsx)", True),
         html.Div(id="up-daily-result"),
-        html.H5("🗓️ Покрытие по дням", className="mt-3"),
-        html.Div(id="up-coverage"),
+        dbc.Button(id="up-cov-toggle", color="link", n_clicks=0,
+                   className="mt-3 p-0 text-decoration-none"),
+        dbc.Collapse(html.Div(id="up-coverage"), id="up-cov-collapse",
+                     is_open=False),
         html.Hr(),
         dbc.Row([
             dbc.Col([html.H5("📒 Справочник SKU"),
@@ -110,7 +113,11 @@ def layout():
                      html.Div(id="up-ref-result")], md=6),
             dbc.Col([html.H5("💰 Продажи (помесячно)"),
                      _uploader("up-sales", "Отчёт продаж (.xlsx)", False),
-                     html.Div(id="up-sales-result")], md=6),
+                     html.Div(id="up-sales-result"),
+                     dbc.Button(id="up-sales-cov-toggle", color="link", n_clicks=0,
+                                className="mt-2 p-0 text-decoration-none"),
+                     dbc.Collapse(html.Div(id="up-sales-coverage"),
+                                  id="up-sales-cov-collapse", is_open=False)], md=6),
         ]),
         html.Hr(),
         html.H5("📜 История загрузок"),
@@ -145,11 +152,18 @@ def _up_sales(contents, names, n):
 
 
 @callback(Output("up-coverage", "children"), Output("up-history", "children"),
+          Output("up-cov-toggle", "children"),
+          Output("up-sales-coverage", "children"),
+          Output("up-sales-cov-toggle", "children"),
           Input("up-refresh", "data"))
 def _coverage_history(_r):
     with SessionLocal() as s:
         days = [d for (d,) in s.execute(
             select(StockDaily.day).distinct().order_by(StockDaily.day))]
+        sales = s.execute(
+            select(Sale.period, func.count(func.distinct(Sale.sku_id)),
+                   func.sum(Sale.revenue))
+            .group_by(Sale.period).order_by(Sale.period)).all()
         ups = s.scalars(select(Upload).order_by(Upload.uploaded_at.desc())
                         .limit(50)).all()
         hist_rows = [{"Когда": u.uploaded_at.strftime("%Y-%m-%d %H:%M"),
@@ -159,6 +173,7 @@ def _coverage_history(_r):
     if not days:
         cov = dbc.Alert("Дневных остатков пока нет — загрузите ведомости выше.",
                         color="info")
+        cov_lbl = "🗓️ Покрытие по дням — нет данных ▾"
     else:
         by = {}
         for d in days:
@@ -181,7 +196,40 @@ def _coverage_history(_r):
         ], className="mb-2")
         cov = html.Div([head, dbc.Table.from_dataframe(
             pd.DataFrame(rows), striped=True, size="sm")])
+        cov_lbl = f"🗓️ Покрытие по дням — {len(days)} дн. ▾"
+
+    if not sales:
+        scov = dbc.Alert("Продаж пока нет — загрузите отчёт продаж.", color="info")
+        scov_lbl = "📆 Покрытие продаж — нет данных ▾"
+    else:
+        srows = [{"Месяц": f"{MONTHS_RU[p.month - 1]} {p.year}", "SKU": cnt,
+                  "Выручка": money(rev or 0)} for (p, cnt, rev) in sales]
+        shead = dbc.Row([
+            dbc.Col(html.Div([html.Div("Месяцев", className="text-muted small"),
+                              html.H5(len(sales))])),
+            dbc.Col(html.Div([html.Div("Первый месяц", className="text-muted small"),
+                              html.H5(srows[0]["Месяц"])])),
+            dbc.Col(html.Div([html.Div("Последний месяц", className="text-muted small"),
+                              html.H5(srows[-1]["Месяц"])])),
+        ], className="mb-2")
+        scov = html.Div([shead, dbc.Table.from_dataframe(
+            pd.DataFrame(srows), striped=True, size="sm")])
+        scov_lbl = f"📆 Покрытие продаж — {len(sales)} мес. ▾"
 
     hist = dbc.Table.from_dataframe(pd.DataFrame(hist_rows), striped=True, size="sm") \
         if hist_rows else dbc.Alert("Загрузок пока нет.", color="info")
-    return cov, hist
+    return cov, hist, cov_lbl, scov, scov_lbl
+
+
+@callback(Output("up-cov-collapse", "is_open"),
+          Input("up-cov-toggle", "n_clicks"),
+          State("up-cov-collapse", "is_open"), prevent_initial_call=True)
+def _toggle_cov(_n, is_open):
+    return not is_open
+
+
+@callback(Output("up-sales-cov-collapse", "is_open"),
+          Input("up-sales-cov-toggle", "n_clicks"),
+          State("up-sales-cov-collapse", "is_open"), prevent_initial_call=True)
+def _toggle_sales_cov(_n, is_open):
+    return not is_open

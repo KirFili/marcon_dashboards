@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 import dash_bootstrap_components as dbc
-from dash import html
+from dash import Input, Output, State, callback, html
 
 PASSWORD = os.getenv("DASHBOARD_PASSWORD", "marcon")
 LOGO_URL = "/assets/stardogs_logo.png"
@@ -25,9 +25,18 @@ def login_layout():
                     html.H3("Аналитические дашборды Маркон", className="mb-4"),
                     html.Div(
                         [
-                            dbc.Input(id="login-pwd", type="password",
-                                      placeholder="Введите пароль", n_submit=0,
-                                      style={"maxWidth": "220px"}),
+                            dbc.InputGroup(
+                                [
+                                    dbc.Input(id="login-pwd", type="password",
+                                              placeholder="Введите пароль",
+                                              n_submit=0),
+                                    dbc.Button("👁", id="login-pwd-toggle",
+                                               color="secondary", outline=True,
+                                               n_clicks=0, type="button",
+                                               title="Показать/скрыть пароль"),
+                                ],
+                                style={"maxWidth": "260px"},
+                            ),
                             dbc.Button("Войти", id="login-btn", color="primary",
                                        n_clicks=0, className="ms-2"),
                         ],
@@ -41,3 +50,10 @@ def login_layout():
         ),
         fluid=True,
     )
+
+
+@callback(Output("login-pwd", "type"),
+          Input("login-pwd-toggle", "n_clicks"),
+          State("login-pwd", "type"), prevent_initial_call=True)
+def _toggle_pwd(_n, cur):
+    return "text" if cur == "password" else "password"
