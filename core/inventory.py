@@ -365,8 +365,12 @@ class SaleRow:
 
 
 def _month_date(s: str) -> date:
-    d, m, y = s.split(".")
-    return date(int(y), int(m), 1)
+    """Дата-месяц из шапки кросс-таба (1-е число). Принимает разделители
+    `.`, `/`, `-` — выгрузки 1С с Windows дают точки, с macOS слэши."""
+    m = re.search(r"(\d{2})[./-](\d{2})[./-](\d{4})", s)
+    if not m:
+        raise ValueError(f"не распознан месяц: {s!r}")
+    return date(int(m.group(3)), int(m.group(2)), 1)
 
 
 def parse_sales(path: str | Path) -> list[SaleRow]:
@@ -392,7 +396,7 @@ def parse_sales(path: str | Path) -> list[SaleRow]:
                 rev_col[cur] = c
             elif m == "Валовая прибыль":
                 gp_col[cur] = c
-    months = sorted(rev_col, key=lambda s: (s[6:10], s[3:5]))
+    months = sorted(rev_col, key=_month_date)
 
     rows: list[SaleRow] = []
     for row in grid[hdr + 2 :]:
